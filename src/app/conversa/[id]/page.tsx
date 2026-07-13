@@ -76,11 +76,6 @@ export default function Chat() {
     if (!user) return;
     const initialLoad = setTimeout(() => void load(), 0);
     const clock = setInterval(() => setNow(Date.now()), 30000);
-    
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
-    }
-    
     const channel = supabase
       .channel(`chat:${id}`)
       .on(
@@ -96,19 +91,12 @@ export default function Chat() {
           setMessages((old) =>
             old.some((x) => x.id === m.id) ? old : [...old, m],
           );
-          if (m.sender_id !== user.id) {
-            if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
-              new Notification(`${friend?.display_name || "CloseChat"}`, {
-                body: m.message_type === "image" ? "Enviou uma fotografia" : m.message_text || "Nova mensagem",
-                icon: "/icons/icon-192.png",
-              });
-            }
+          if (m.sender_id !== user.id)
             await supabase
               .from("conversation_members")
               .update({ last_read_at: new Date().toISOString() })
               .eq("conversation_id", id)
               .eq("user_id", user.id);
-          }
         },
       )
       .on(
@@ -288,35 +276,38 @@ export default function Chat() {
                       className={`group flex ${own ? "justify-end" : "justify-start"}`}
                     >
                       <div
-                        className={`max-w-[82%] rounded-[21px] px-3.5 py-2.5 ${own ? "rounded-br-md bg-[var(--brand)] text-white" : "rounded-bl-md bg-[var(--surface)]"}`}
+                        className={`max-w-[85%] rounded-[24px] px-4 py-3 shadow-sm ${own ? "rounded-br-sm bg-gradient-to-br from-[var(--brand)] to-[var(--brand)]/90 text-white" : "rounded-bl-sm bg-[var(--surface)] border border-[var(--border)]"}`}
                       >
                         {m.reply_to_message_id && (
                           <div
-                            className={`mb-2 rounded-xl border-l-2 p-2 text-xs ${own ? "border-white/70 bg-white/10" : "border-[var(--brand)] bg-[var(--surface-2)]"}`}
+                            className={`mb-2.5 rounded-xl border-l-3 p-2.5 text-xs ${own ? "border-white/60 bg-white/10" : "border-[var(--brand)]/50 bg-[var(--surface-2)]"}`}
                           >
-                            Resposta a uma mensagem
+                            <div className="flex items-center gap-1.5 font-medium">
+                              <Reply size={11} />
+                              Resposta a uma mensagem
+                            </div>
                           </div>
                         )}
                         {m.message_type === "image" && m.signed_image_url && (
                           <button
                             onClick={() => setLightbox(m.signed_image_url!)}
-                            className="mb-1 block overflow-hidden rounded-2xl"
+                            className="mb-2.5 block overflow-hidden rounded-2xl shadow-sm"
                           >
                             <img
                               src={m.signed_image_url}
                               alt={m.image_caption || "Fotografia"}
-                              className="max-h-80 w-full object-cover"
+                              className="max-h-72 w-full object-cover"
                               loading="lazy"
                             />
                           </button>
                         )}
                         {m.message_text && (
-                          <p className="whitespace-pre-wrap break-words text-[15px] leading-5">
+                          <p className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">
                             {m.message_text}
                           </p>
                         )}
                         <div
-                          className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${own ? "text-white/70" : "muted"}`}
+                          className={`mt-2 flex items-center justify-end gap-1.5 text-[10px] ${own ? "text-white/75" : "muted"}`}
                         >
                           <time>
                             {new Date(m.created_at).toLocaleTimeString(
@@ -324,16 +315,16 @@ export default function Chat() {
                               { hour: "2-digit", minute: "2-digit" },
                             )}
                           </time>
-                          {own && <CheckCheck size={13} />}
+                          {own && <CheckCheck size={12} className="text-white/90" />}
                         </div>
                         <div
-                          className={`mt-1 flex gap-2 border-t pt-1 text-[10px] ${own ? "border-white/15" : "hairline"}`}
+                          className={`mt-2 flex gap-3 border-t pt-2 text-[10px] ${own ? "border-white/15" : "hairline"}`}
                         >
                           <button
                             onClick={() => setReply(m)}
-                            className="flex items-center gap-1"
+                            className="flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity"
                           >
-                            <Reply size={12} />
+                            <Reply size={11} />
                             Responder
                           </button>
                           {m.message_type === "text" && (
@@ -343,18 +334,18 @@ export default function Chat() {
                                   m.message_text || "",
                                 )
                               }
-                              className="flex items-center gap-1"
+                              className="flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity"
                             >
-                              <Copy size={12} />
+                              <Copy size={11} />
                               Copiar
                             </button>
                           )}
                           {own && (
                             <button
                               onClick={() => remove(m)}
-                              className="ml-auto"
+                              className="ml-auto opacity-60 hover:opacity-100 transition-opacity"
                             >
-                              <Trash2 size={12} />
+                              <Trash2 size={11} />
                             </button>
                           )}
                         </div>
@@ -409,28 +400,27 @@ export default function Chat() {
           </button>
         </footer>
         {lightbox && (
-          <div className="fixed inset-0 z-50 grid place-items-center bg-black/95 p-3">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black animate-in fade-in duration-200">
             <button
               onClick={() => setLightbox(null)}
-              className="absolute right-4 top-[max(18px,env(safe-area-inset-top))] grid size-11 place-items-center rounded-full bg-white/15 text-white"
+              className="absolute right-4 top-[max(18px,env(safe-area-inset-top))] grid size-11 place-items-center rounded-full bg-black/40 backdrop-blur-md text-white press"
             >
-              <X />
+              <X size={24} />
             </button>
-            <img
-              src={lightbox}
-              alt="Fotografia em ecrã inteiro"
-              className="max-h-[88dvh] max-w-full touch-pinch-zoom object-contain"
-            />
-            <div className="absolute bottom-[max(18px,env(safe-area-inset-bottom))] flex gap-3">
-              <span className="grid size-11 place-items-center rounded-full bg-white/15 text-white">
-                <ZoomIn />
-              </span>
+            <div className="relative h-full w-full flex items-center justify-center p-4">
+              <img
+                src={lightbox}
+                alt="Fotografia em ecrã inteiro"
+                className="max-h-[85dvh] max-w-full object-contain animate-in zoom-in-95 duration-200"
+              />
+            </div>
+            <div className="absolute bottom-[max(24px,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 flex gap-4">
               <a
                 href={lightbox}
                 download
-                className="grid size-11 place-items-center rounded-full bg-white/15 text-white"
+                className="grid size-12 place-items-center rounded-full bg-white/20 backdrop-blur-md text-white press hover:bg-white/30 transition-colors"
               >
-                <Download />
+                <Download size={22} />
               </a>
             </div>
           </div>

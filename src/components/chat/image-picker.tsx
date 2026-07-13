@@ -20,11 +20,11 @@ export function ImagePicker({ onSend }: { onSend: (file: File, caption: string) 
       setBusy(true);
       setFromCamera(isCamera);
       const compressed = await imageCompression(raw, {
-        maxSizeMB: 0.8,
-        maxWidthOrHeight: 1920,
+        maxSizeMB: 0.5,
+        maxWidthOrHeight: 1280,
         useWebWorker: true,
         fileType: "image/webp",
-        initialQuality: 0.85,
+        initialQuality: 0.8,
       });
       setFile(compressed);
       setPreview(URL.createObjectURL(compressed));
@@ -83,48 +83,48 @@ export function ImagePicker({ onSend }: { onSend: (file: File, caption: string) 
         onChange={(e) => choose(e.target.files, false)}
       />
       {(preview || busy) && (
-        <div className="fixed inset-0 z-50 flex items-end bg-black/60 p-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur-sm">
-          <div className="mx-auto w-full max-w-[420px] rounded-[30px] bg-[var(--surface)] p-4 fade-up">
-            {preview ? (
-              <>
-                <div className="relative overflow-hidden rounded-[22px] bg-black">
-                  <img
-                    src={preview}
-                    alt="Pré-visualização"
-                    className="max-h-[58dvh] w-full object-contain"
-                  />
-                  <button
-                    onClick={() => {
-                      setFile(null);
-                      setPreview(null);
-                      setFromCamera(false);
-                    }}
-                    className="absolute right-3 top-3 grid size-9 place-items-center rounded-full bg-black/50 text-white press"
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm animate-in fade-in duration-200">
+          <button
+            onClick={() => {
+              setFile(null);
+              setPreview(null);
+              setFromCamera(false);
+            }}
+            className="absolute right-4 top-[max(18px,env(safe-area-inset-top))] grid size-11 place-items-center rounded-full bg-white/20 backdrop-blur-md text-white press"
+          >
+            <X size={24} />
+          </button>
+          {preview ? (
+            <div className="flex h-full w-full flex-col">
+              <div className="flex-1 flex items-center justify-center p-4">
+                <img
+                  src={preview}
+                  alt="Pré-visualização"
+                  className="max-h-[60dvh] max-w-full object-contain animate-in zoom-in-95 duration-200"
+                />
+              </div>
+              <div className="mx-auto w-full max-w-[420px] p-4 pb-[max(24px,env(safe-area-inset-bottom))]">
                 <textarea
                   value={caption}
                   onChange={(e) => setCaption(e.target.value)}
                   placeholder="Legenda (opcional)…"
-                  className="mt-3 w-full resize-none rounded-xl bg-[var(--surface-2)] p-3 text-sm"
+                  className="w-full resize-none rounded-2xl bg-white/10 backdrop-blur-md p-4 text-white placeholder-white/50 text-sm"
                   rows={2}
                 />
                 <button
                   onClick={send}
                   disabled={busy}
-                  className="mt-3 w-full rounded-xl bg-[var(--brand)] py-3 font-semibold text-white press disabled:opacity-50"
+                  className="mt-3 w-full rounded-2xl bg-[var(--brand)] py-3.5 font-semibold text-white press disabled:opacity-50"
                 >
                   {busy ? <LoaderCircle size={20} className="mx-auto animate-spin" /> : "Enviar"}
                 </button>
-              </>
-            ) : (
-              <div className="grid h-32 place-items-center">
-                <LoaderCircle size={32} className="animate-spin text-[var(--brand)]" />
               </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="grid h-32 place-items-center">
+              <LoaderCircle size={32} className="animate-spin text-white" />
+            </div>
+          )}
         </div>
       )}
     </>
