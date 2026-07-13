@@ -1,5 +1,104 @@
 "use client";
-import { useState } from "react"; import Link from "next/link"; import { useRouter, useSearchParams } from "next/navigation"; import { Eye, EyeOff, LoaderCircle, MessageCircleHeart } from "lucide-react"; import { toast } from "sonner"; import { createClient } from "@/lib/supabase/client";
-type Mode="login"|"register"|"recover";
-export function AuthCard({mode}:{mode:Mode}){const supabase=createClient(),router=useRouter(),search=useSearchParams();const[busy,setBusy]=useState(false),[show,setShow]=useState(false);async function submit(e:React.FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);const f=new FormData(e.currentTarget),email=String(f.get("email")||""),password=String(f.get("password")||"");try{if(mode==="login"){const{error}=await supabase.auth.signInWithPassword({email,password});if(error)throw error;router.replace(search.get("next")||"/conversas");router.refresh()}else if(mode==="recover"){const{error}=await supabase.auth.resetPasswordForEmail(email,{redirectTo:`${location.origin}/perfil/editar?reset=1`});if(error)throw error;toast.success("Enviámos o link de recuperação.")}else{const confirm=String(f.get("confirm")||""),display_name=String(f.get("display_name")||"").trim(),username=String(f.get("username")||"").toLowerCase().trim();if(password!==confirm)throw new Error("As palavras-passe não coincidem.");if(!/^[a-z0-9_]{3,24}$/.test(username))throw new Error("O nome de utilizador deve ter 3–24 letras, números ou _.");const{error}=await supabase.auth.signUp({email,password,options:{emailRedirectTo:`${location.origin}/auth/callback`,data:{display_name,username}}});if(error)throw error;router.push("/auth/confirmado")}}catch(err){toast.error(err instanceof Error?err.message:"Ocorreu um erro.")}finally{setBusy(false)}}const titles={login:["Bem-vindo de volta","As tuas conversas estão à espera."],register:["Cria o teu círculo","Só tu e as pessoas que escolheste."],recover:["Recuperar acesso","Enviaremos um link seguro para o teu email."]};return <main className="app-frame safe-top flex min-h-dvh flex-col px-5 pb-8"><div className="mt-8 flex items-center gap-3"><span className="grid size-11 place-items-center rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-white shadow-lg"><MessageCircleHeart/></span><span className="text-lg font-extrabold tracking-tight">CloseChat</span></div><div className="my-auto py-10"><h1 className="text-[34px] font-bold leading-tight tracking-[-.04em]">{titles[mode][0]}</h1><p className="mt-2 muted">{titles[mode][1]}</p><form onSubmit={submit} className="mt-8 space-y-3">{mode==="register"&&<><Field name="display_name" label="Nome" autoComplete="name"/><Field name="username" label="Nome de utilizador" prefix="@" autoCapitalize="none"/></>}<Field name="email" label="Email" type="email" autoComplete="email" autoCapitalize="none"/>{mode!=="recover"&&<><div className="relative"><Field name="password" label="Palavra-passe" type={show?"text":"password"} autoComplete={mode==="login"?"current-password":"new-password"}/><button type="button" onClick={()=>setShow(!show)} aria-label="Mostrar palavra-passe" className="absolute right-4 top-4 muted">{show?<EyeOff size={20}/>:<Eye size={20}/>}</button></div>{mode==="register"&&<Field name="confirm" label="Confirmar palavra-passe" type={show?"text":"password"} autoComplete="new-password"/>}</>}<button disabled={busy} className="press mt-2 flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] py-4 font-bold text-white shadow-lg shadow-indigo-500/20 disabled:opacity-60">{busy&&<LoaderCircle className="animate-spin" size={19}/>} {mode==="login"?"Entrar":mode==="register"?"Criar conta":"Enviar link"}</button></form>{mode==="login"&&<Link href="/recuperar" className="mt-5 block text-center text-sm font-semibold text-[var(--brand)]">Esqueci-me da palavra-passe</Link>}</div><p className="text-center text-sm muted">{mode==="login"?<>Ainda não tens conta? <Link className="font-bold text-[var(--ink)]" href="/registo">Regista-te</Link></>:<>Já tens conta? <Link className="font-bold text-[var(--ink)]" href="/login">Entrar</Link></>}</p></main>}
-function Field(props:React.InputHTMLAttributes<HTMLInputElement>&{label:string;prefix?:string}){const{label,prefix,...rest}=props;return <label className="flex items-center rounded-2xl border hairline bg-[var(--surface)] px-4 focus-within:border-[var(--brand)]"><span className="sr-only">{label}</span>{prefix&&<span className="muted">{prefix}</span>}<input {...rest} name={rest.name} required className="w-full bg-transparent py-4 text-[15px]" placeholder={label}/></label>}
+
+import { useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { AlertTriangle, Eye, EyeOff, LoaderCircle, MessageCircleHeart } from "lucide-react";
+import { toast } from "sonner";
+import { createClient, isSupabaseConfigured } from "@/lib/supabase/client";
+
+type Mode = "login" | "register" | "recover";
+
+export function AuthCard({ mode }: { mode: Mode }) {
+  const router = useRouter();
+  const search = useSearchParams();
+  const [busy, setBusy] = useState(false);
+  const [show, setShow] = useState(false);
+  const configured = isSupabaseConfigured();
+  const supabase = configured ? createClient() : null;
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase) {
+      toast.error("O Supabase ainda não está configurado.");
+      return;
+    }
+    setBusy(true);
+    const form = new FormData(event.currentTarget);
+    const email = String(form.get("email") || "");
+    const password = String(form.get("password") || "");
+    try {
+      if (mode === "login") {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        router.replace(search.get("next") || "/conversas");
+        router.refresh();
+      } else if (mode === "recover") {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${location.origin}/perfil/editar?reset=1`,
+        });
+        if (error) throw error;
+        toast.success("Enviámos o link de recuperação.");
+      } else {
+        const confirm = String(form.get("confirm") || "");
+        const display_name = String(form.get("display_name") || "").trim();
+        const username = String(form.get("username") || "").toLowerCase().trim();
+        if (password !== confirm) throw new Error("As palavras-passe não coincidem.");
+        if (!/^[a-z0-9_]{3,24}$/.test(username)) {
+          throw new Error("O nome de utilizador deve ter 3–24 letras, números ou _.");
+        }
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            emailRedirectTo: `${location.origin}/auth/callback`,
+            data: { display_name, username },
+          },
+        });
+        if (error) throw error;
+        router.push("/auth/confirmado");
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Ocorreu um erro.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const titles = {
+    login: ["Bem-vindo de volta", "As tuas conversas estão à espera."],
+    register: ["Cria o teu círculo", "Só tu e as pessoas que escolheste."],
+    recover: ["Recuperar acesso", "Enviaremos um link seguro para o teu email."],
+  };
+
+  return (
+    <main className="app-frame safe-top flex min-h-dvh flex-col px-5 pb-8">
+      <div className="mt-8 flex items-center gap-3">
+        <span className="grid size-11 place-items-center rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-white shadow-lg"><MessageCircleHeart /></span>
+        <span className="text-lg font-extrabold tracking-tight">CloseChat</span>
+      </div>
+      <div className="my-auto py-10">
+        <h1 className="text-[34px] font-bold leading-tight tracking-[-.04em]">{titles[mode][0]}</h1>
+        <p className="mt-2 muted">{titles[mode][1]}</p>
+        {!configured && (
+          <div className="mt-6 flex gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="mt-0.5 shrink-0" size={19} />
+            <p>Configura <code>NEXT_PUBLIC_SUPABASE_URL</code> e <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code> nas variáveis do projeto.</p>
+          </div>
+        )}
+        <form onSubmit={submit} className="mt-8 space-y-3">
+          {mode === "register" && <><Field name="display_name" label="Nome" autoComplete="name" /><Field name="username" label="Nome de utilizador" prefix="@" autoCapitalize="none" /></>}
+          <Field name="email" label="Email" type="email" autoComplete="email" autoCapitalize="none" />
+          {mode !== "recover" && <><div className="relative"><Field name="password" label="Palavra-passe" type={show ? "text" : "password"} autoComplete={mode === "login" ? "current-password" : "new-password"} /><button type="button" onClick={() => setShow(!show)} aria-label="Mostrar palavra-passe" className="absolute right-4 top-4 muted">{show ? <EyeOff size={20} /> : <Eye size={20} />}</button></div>{mode === "register" && <Field name="confirm" label="Confirmar palavra-passe" type={show ? "text" : "password"} autoComplete="new-password" />}</>}
+          <button disabled={busy || !configured} className="press mt-2 flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] py-4 font-bold text-white shadow-lg shadow-indigo-500/20 disabled:opacity-50">{busy && <LoaderCircle className="animate-spin" size={19} />}{mode === "login" ? "Entrar" : mode === "register" ? "Criar conta" : "Enviar link"}</button>
+        </form>
+        {mode === "login" && <Link href="/recuperar" className="mt-5 block text-center text-sm font-semibold text-[var(--brand)]">Esqueci-me da palavra-passe</Link>}
+      </div>
+      <p className="text-center text-sm muted">{mode === "login" ? <>Ainda não tens conta? <Link className="font-bold text-[var(--ink)]" href="/registo">Regista-te</Link></> : <>Já tens conta? <Link className="font-bold text-[var(--ink)]" href="/login">Entrar</Link></>}</p>
+    </main>
+  );
+}
+
+function Field({ label, prefix, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { label: string; prefix?: string }) {
+  return <label className="flex items-center rounded-2xl border hairline bg-[var(--surface)] px-4 focus-within:border-[var(--brand)]"><span className="sr-only">{label}</span>{prefix && <span className="muted">{prefix}</span>}<input {...props} required className="w-full bg-transparent py-4 text-[15px]" placeholder={label} /></label>;
+}
