@@ -3,22 +3,45 @@ import { useRef, useState } from "react";
 import imageCompression from "browser-image-compression";
 import { Camera, ImagePlus, LoaderCircle, Send, X } from "lucide-react";
 import { toast } from "sonner";
+import { CustomCamera } from "./custom-camera";
 
-export function ImagePicker({ onSend }: { onSend: (file: File, caption: string) => Promise<void> }) {
-  const camera = useRef<HTMLInputElement>(null);
+export function ImagePicker({ onSend }: { onSend: (file: File, caption: string, viewOnce?: boolean) => Promise<void> }) {
   const gallery = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
   const [fromCamera, setFromCamera] = useState(false);
+  const [viewOnce, setViewOnce] = useState(false);
 
-  async function choose(list: FileList | null, isCamera: boolean) {
+  async function handleCameraCapture(capturedFile: File) {
+    setShowCamera(false);
+    try {
+      setBusy(true);
+      setFromCamera(true);
+      const compressed = await imageCompression(capturedFile, {
+        maxSizeMB: 0.5,
+        maxWidthOrHeight: 1280,
+        useWebWorker: true,
+        fileType: "image/webp",
+        initialQuality: 0.8,
+      });
+      setFile(compressed);
+      setPreview(URL.createObjectURL(compressed));
+    } catch {
+      toast.error("Não foi possível preparar a fotografia.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function choose(list: FileList | null) {
     const raw = list?.[0];
     if (!raw) return;
     try {
       setBusy(true);
-      setFromCamera(isCamera);
+      setFromCamera(false);
       const compressed = await imageCompression(raw, {
         maxSizeMB: 0.5,
         maxWidthOrHeight: 1280,
@@ -39,11 +62,12 @@ export function ImagePicker({ onSend }: { onSend: (file: File, caption: string) 
     if (!file) return;
     setBusy(true);
     try {
-      await onSend(file, caption);
+      await onSend(file, caption, fromCamera ? viewOnce : false);
       setFile(null);
       setPreview(null);
       setCaption("");
       setFromCamera(false);
+      setViewOnce(false);
     } finally {
       setBusy(false);
     }
@@ -51,9 +75,15 @@ export function ImagePicker({ onSend }: { onSend: (file: File, caption: string) 
 
   return (
     <>
+      {showCamera && (
+        <CustomCamera
+          onCapture={handleCameraCapture}
+          onClose={() => setShowCamera(false)}
+        />
+      )}
       <div className="flex gap-1">
         <button
-          onClick={() => camera.current?.click()}
+          onClick={() => setShowCamera(true)}
           aria-label="Câmara"
           className="press grid size-10 place-items-center rounded-full text-[var(--brand)]"
         >
@@ -68,19 +98,11 @@ export function ImagePicker({ onSend }: { onSend: (file: File, caption: string) 
         </button>
       </div>
       <input
-        ref={camera}
-        hidden
-        type="file"
-        accept="image/*"
-        capture="environment"
-        onChange={(e) => choose(e.target.files, true)}
-      />
-      <input
         ref={gallery}
         hidden
         type="file"
         accept="image/*"
-        onChange={(e) => choose(e.target.files, false)}
+        onChange={(e) => choose(e.target.files)}
       />
       {(preview || busy) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-sm animate-in fade-in duration-200">
@@ -104,6 +126,19 @@ export function ImagePicker({ onSend }: { onSend: (file: File, caption: string) 
                 />
               </div>
               <div className="mx-auto w-full max-w-[420px] p-4 pb-[max(24px,env(safe-area-inset-bottom))]">
+                {fromCamera && (
+                  <div className="mb-3 flex items-center justify-between rounded-2xl bg-white/10 backdrop-blur-md p-3">
+                    <span className="text-sm text-white">Visualização única</span>
+                    <button
+                      onClick={() => setViewOnce(!viewOnce)}
+                      className={`relative h-7 w-12 rounded-full transition-colors ${viewOnce ? "bg-[var(--brand)]" : "bg-white/30"}`}
+                    >
+                      <div
+                        className={`absolute top-1 size-5 rounded-full bg-white transition-transform ${viewOnce ? "translate-x-5" : "translate-x-1"}`}
+                      />
+                    </button>
+                  </div>
+                )}
                 <textarea
                   value={caption}
                   onChange={(e) => setCaption(e.target.value)}

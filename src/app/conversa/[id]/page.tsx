@@ -63,8 +63,19 @@ export default function Chat() {
       toast.error("Não tens acesso a esta conversa.");
       return;
     }
-    setMessages(await hydrateImages((rows || []) as Message[]));
+    const messages = await hydrateImages((rows || []) as Message[]);
+    setMessages(messages);
     setFriend((Array.isArray(who) ? who[0] : who) as Profile | null);
+    
+    // Mark messages as read
+    const unreadMessages = messages.filter(m => m.sender_id !== user.id && !m.read_at);
+    if (unreadMessages.length > 0) {
+      await supabase
+        .from("messages")
+        .update({ read_at: new Date().toISOString() })
+        .in("id", unreadMessages.map(m => m.id));
+    }
+    
     await supabase
       .from("conversation_members")
       .update({ last_read_at: new Date().toISOString() })
@@ -91,12 +102,18 @@ export default function Chat() {
           setMessages((old) =>
             old.some((x) => x.id === m.id) ? old : [...old, m],
           );
-          if (m.sender_id !== user.id)
+          if (m.sender_id !== user.id) {
+            // Mark as read immediately
+            await supabase
+              .from("messages")
+              .update({ read_at: new Date().toISOString() })
+              .eq("id", m.id);
             await supabase
               .from("conversation_members")
               .update({ last_read_at: new Date().toISOString() })
               .eq("conversation_id", id)
               .eq("user_id", user.id);
+          }
         },
       )
       .on(
@@ -107,8 +124,16 @@ export default function Chat() {
           table: "messages",
           filter: `conversation_id=eq.${id}`,
         },
-        ({ new: row }) =>
-          setMessages((old) => old.filter((m) => m.id !== (row as Message).id)),
+        ({ new: row }) => {
+          const updated = row as Message;
+          if (updated.deleted_at) {
+            setMessages((old) => old.filter((m) => m.id !== updated.id));
+          } else {
+            setMessages((old) =>
+              old.map((m) => (m.id === updated.id ? { ...m, ...updated } : m))
+            );
+          }
+        },
       )
       .on("broadcast", { event: "typing" }, ({ payload }) => {
         if (payload.user_id !== user.id) {
@@ -148,7 +173,7 @@ export default function Chat() {
     setReply(null);
     setSending(false);
   }
-  async function sendImage(file: File, caption: string) {
+  async function sendImage(file: File, caption: string, viewOnce?: boolean) {
     if (!user) return;
     const messageId = crypto.randomUUID(),
       path = `${id}/${messageId}.webp`;
@@ -170,6 +195,7 @@ export default function Chat() {
         image_caption: caption.trim() || null,
         message_text: caption.trim() || null,
         reply_to_message_id: reply?.id || null,
+        view_once: viewOnce || null,
       });
     if (error) {
       await supabase.storage.from("chat-images").remove([path]);
@@ -289,17 +315,25 @@ export default function Chat() {
                           </div>
                         )}
                         {m.message_type === "image" && m.signed_image_url && (
-                          <button
-                            onClick={() => setLightbox(m.signed_image_url!)}
-                            className="mb-2.5 block overflow-hidden rounded-2xl shadow-sm"
-                          >
-                            <img
-                              src={m.signed_image_url}
-                              alt={m.image_caption || "Fotografia"}
-                              className="max-h-72 w-full object-cover"
-                              loading="lazy"
-                            />
-                          </button>
+                          <div className="relative">
+                            {m.view_once && (
+                              <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-medium text-white backdrop-blur-sm">
+                                <span className="size-1.5 rounded-full bg-red-500 animate-pulse" />
+                                Visualização única
+                              </div>
+                            )}
+                            <button
+                              onClick={() => setLightbox(m.signed_image_url!)}
+                              className="mb-2.5 block overflow-hidden rounded-2xl shadow-sm"
+                            >
+                              <img
+                                src={m.signed_image_url}
+                                alt={m.image_caption || "Fotografia"}
+                                className="max-h-72 w-full object-cover"
+                                loading="lazy"
+                              />
+                            </button>
+                          </div>
                         )}
                         {m.message_text && (
                           <p className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">
@@ -315,7 +349,12 @@ export default function Chat() {
                               { hour: "2-digit", minute: "2-digit" },
                             )}
                           </time>
-                          {own && <CheckCheck size={12} className="text-white/90" />}
+                          {own && (
+                            <CheckCheck 
+                              size={12} 
+                              className={m.read_at ? "text-blue-400" : "text-white/90"} 
+                            />
+                          )}
                         </div>
                         <div
                           className={`mt-2 flex gap-3 border-t pt-2 text-[10px] ${own ? "border-white/15" : "hairline"}`}
