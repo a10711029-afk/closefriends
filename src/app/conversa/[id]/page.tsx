@@ -76,6 +76,11 @@ export default function Chat() {
     if (!user) return;
     const initialLoad = setTimeout(() => void load(), 0);
     const clock = setInterval(() => setNow(Date.now()), 30000);
+    
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+    
     const channel = supabase
       .channel(`chat:${id}`)
       .on(
@@ -91,12 +96,19 @@ export default function Chat() {
           setMessages((old) =>
             old.some((x) => x.id === m.id) ? old : [...old, m],
           );
-          if (m.sender_id !== user.id)
+          if (m.sender_id !== user.id) {
+            if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
+              new Notification(`${friend?.display_name || "CloseChat"}`, {
+                body: m.message_type === "image" ? "Enviou uma fotografia" : m.message_text || "Nova mensagem",
+                icon: "/icons/icon-192.png",
+              });
+            }
             await supabase
               .from("conversation_members")
               .update({ last_read_at: new Date().toISOString() })
               .eq("conversation_id", id)
               .eq("user_id", user.id);
+          }
         },
       )
       .on(
@@ -294,6 +306,7 @@ export default function Chat() {
                               src={m.signed_image_url}
                               alt={m.image_caption || "Fotografia"}
                               className="max-h-80 w-full object-cover"
+                              loading="lazy"
                             />
                           </button>
                         )}
