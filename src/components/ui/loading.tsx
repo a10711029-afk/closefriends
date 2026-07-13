@@ -1,0 +1,1 @@
+export function LoadingList() { return <div className="space-y-3 px-4">{[1,2,3,4].map(i=><div key={i} className="flex items-center gap-3 rounded-3xl bg-[var(--surface)] p-3"><div className="skeleton size-14 rounded-full"/><div className="flex-1"><div className="skeleton h-4 w-2/5 rounded"/><div className="skeleton mt-2 h-3 w-4/5 rounded"/></div></div>)}</div>; }

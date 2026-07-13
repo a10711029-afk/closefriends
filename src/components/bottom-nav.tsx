@@ -1,0 +1,4 @@
+"use client";
+import Link from "next/link"; import { MessageCircle, Users, UserRound } from "lucide-react"; import { usePathname } from "next/navigation";
+const items=[{href:"/conversas",label:"Conversas",icon:MessageCircle},{href:"/amigos",label:"Amigos",icon:Users},{href:"/perfil",label:"Perfil",icon:UserRound}];
+export function BottomNav(){const path=usePathname();return <nav className="glass safe-bottom fixed inset-x-0 bottom-0 z-40 mx-auto flex max-w-[430px] justify-around border-t hairline px-5 pt-2">{items.map(({href,label,icon:Icon})=>{const active=path.startsWith(href);return <Link key={href} href={href} className={`press flex min-w-20 flex-col items-center gap-1 rounded-2xl py-1.5 text-[11px] font-semibold ${active?"text-[var(--brand)]":"muted"}`}><span className={active?"rounded-xl bg-[color-mix(in_srgb,var(--brand)_12%,transparent)] p-1.5":"p-1.5"}><Icon size={21} strokeWidth={active?2.6:2}/></span>{label}</Link>})}</nav>}

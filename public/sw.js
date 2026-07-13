@@ -1,0 +1,6 @@
+const CACHE="closechat-v1",SHELL=["/offline","/manifest.webmanifest","/icons/icon-192.png"];
+self.addEventListener("install",e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting())));
+self.addEventListener("activate",e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
+self.addEventListener("fetch",e=>{if(e.request.method!=="GET"||new URL(e.request.url).pathname.startsWith("/auth/"))return;e.respondWith(fetch(e.request).then(r=>{if(r.ok&&e.request.url.startsWith(self.location.origin)){const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy))}return r}).catch(()=>caches.match(e.request).then(hit=>hit||caches.match("/offline"))))});
+self.addEventListener("push",e=>{const d=e.data?.json()||{title:"CloseChat",body:"Tens uma nova atualização."};e.waitUntil(self.registration.showNotification(d.title,{body:d.preview===false?"Tens uma nova atualização.":d.body,icon:"/icons/icon-192.png",badge:"/icons/icon-192.png",data:{url:d.url||"/conversas"}}))});
+self.addEventListener("notificationclick",e=>{e.notification.close();e.waitUntil(clients.openWindow(e.notification.data.url))});
