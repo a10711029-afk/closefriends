@@ -9,6 +9,7 @@ import {
   LoaderCircle,
   MessageCircle,
   Reply,
+  Search,
   Send,
   Trash2,
   X,
@@ -32,18 +33,38 @@ export default function Chat() {
     [typing, setTyping] = useState(false),
     [reply, setReply] = useState<Message | null>(null),
     [lightbox, setLightbox] = useState<string | null>(null),
-    [now, setNow] = useState(0);
+    [now, setNow] = useState(0),
+    [deleteConfirm, setDeleteConfirm] = useState<Message | null>(null),
+    [editing, setEditing] = useState<Message | null>(null),
+    [editText, setEditText] = useState(""),
+    [doubleTapTimer, setDoubleTapTimer] = useState<ReturnType<typeof setTimeout> | null>(null),
+    [searchQuery, setSearchQuery] = useState(""),
+    [showSearch, setShowSearch] = useState(false);
   const bottom = useRef<HTMLDivElement>(null),
     typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydrateImages = useCallback(
     async (rows: Message[]) =>
       Promise.all(
         rows.map(async (m) => {
-          if (m.message_type !== "image" || !m.image_url) return m;
-          const { data } = await supabase.storage
-            .from("chat-images")
-            .createSignedUrl(m.image_url, 3600);
-          return { ...m, signed_image_url: data?.signedUrl };
+          let signedUrl = m.signed_image_url;
+          if (m.message_type === "image" && m.image_url && !signedUrl) {
+            const { data } = await supabase.storage
+              .from("chat-images")
+              .createSignedUrl(m.image_url, 3600);
+            signedUrl = data?.signedUrl;
+          }
+          
+          let replyData = m.reply;
+          if (m.reply_to_message_id && !replyData) {
+            const { data: replyMsg } = await supabase
+              .from("messages")
+              .select("id, message_text, message_type")
+              .eq("id", m.reply_to_message_id)
+              .single();
+            replyData = replyMsg as Pick<Message, "id" | "message_text" | "message_type"> | null;
+          }
+          
+          return { ...m, signed_image_url: signedUrl, reply: replyData };
         }),
       ),
     [supabase],
@@ -153,6 +174,10 @@ export default function Chat() {
     bottom.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, typing]);
   async function sendText() {
+    if (editing) {
+      await editMessage();
+      return;
+    }
     const body = text.trim();
     if (!body || !user || sending) return;
     setSending(true);
@@ -214,52 +239,162 @@ export default function Chat() {
         payload: { user_id: user?.id, typing: !!value },
       });
   }
-  async function remove(m: Message) {
+  async function remove(m: Message, deleteForBoth: boolean = false) {
+    if (deleteForBoth) {
+      const { error } = await supabase
+        .from("messages")
+        .update({
+          deleted_at: new Date().toISOString(),
+          message_text: null,
+          image_caption: null,
+          image_url: null,
+        })
+        .eq("id", m.id);
+      if (error) toast.error("Não foi possível apagar.");
+      else if (m.image_url)
+        await supabase.storage.from("chat-images").remove([m.image_url]);
+    } else {
+      const { error } = await supabase
+        .from("messages")
+        .update({
+          deleted_at: new Date().toISOString(),
+          message_text: null,
+          image_caption: null,
+        })
+        .eq("id", m.id)
+        .eq("sender_id", user?.id);
+      if (error) toast.error("Não foi possível apagar.");
+    }
+    setDeleteConfirm(null);
+  }
+
+  async function editMessage() {
+    if (!editing || !editText.trim() || !user) return;
     const { error } = await supabase
       .from("messages")
-      .update({
-        deleted_at: new Date().toISOString(),
-        message_text: null,
-        image_caption: null,
-      })
+      .update({ message_text: editText.trim() })
+      .eq("id", editing.id)
+      .eq("sender_id", user.id);
+    if (error) {
+      toast.error("Não foi possível editar.");
+    } else {
+      setEditing(null);
+      setEditText("");
+    }
+  }
+
+  function startEdit(m: Message) {
+    setEditing(m);
+    setEditText(m.message_text || "");
+    setText(m.message_text || "");
+  }
+
+  function cancelEdit() {
+    setEditing(null);
+    setEditText("");
+    setText("");
+  }
+
+  async function toggleReaction(m: Message) {
+    if (!user) return;
+    const newReaction = m.reaction === "❤️" ? null : "❤️";
+    const { error } = await supabase
+      .from("messages")
+      .update({ reaction: newReaction })
       .eq("id", m.id);
-    if (error) toast.error("Não foi possível apagar.");
-    else if (m.image_url)
-      await supabase.storage.from("chat-images").remove([m.image_url]);
+    if (error) toast.error("Não foi possível reagir.");
+  }
+
+  function handleDoubleTap(m: Message) {
+    if (doubleTapTimer) {
+      clearTimeout(doubleTapTimer);
+      setDoubleTapTimer(null);
+      toggleReaction(m);
+    } else {
+      setDoubleTapTimer(setTimeout(() => setDoubleTapTimer(null), 300));
+    }
   }
   const online =
     !!friend?.last_seen &&
     now - new Date(friend.last_seen).getTime() < 120000;
+
+  const filteredMessages = searchQuery
+    ? messages.filter(m => 
+        m.message_text?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        m.image_caption?.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : messages;
   return (
     <AuthGate>
       <main className="app-frame flex h-dvh flex-col overflow-hidden">
-        <header className="safe-top z-20 flex items-center gap-3 border-b hairline px-3 pb-3 glass">
+        <header className="safe-top z-20 flex items-center gap-3 border-b hairline px-4 pb-3 glass">
           <Link
             href="/conversas"
-            className="press grid size-10 place-items-center rounded-full"
+            className="press grid size-10 place-items-center rounded-full hover:bg-[var(--surface-2)] transition-colors"
           >
             <ArrowLeft size={23} />
           </Link>
-          <Avatar
-            src={friend?.avatar_url}
-            name={friend?.display_name}
-            size="sm"
-            online={online}
-          />
-          <div className="min-w-0">
-            <h1 className="truncate font-bold">
-              {friend?.display_name || "Conversa"}
-            </h1>
-            <p className="text-xs muted">
-              {typing
-                ? "está a escrever…"
-                : online
-                  ? "online"
-                  : friend?.last_seen
-                    ? `visto ${new Date(friend.last_seen).toLocaleString("pt-PT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
-                    : "offline"}
-            </p>
-          </div>
+          {showSearch ? (
+            <div className="flex-1 flex items-center gap-2">
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Pesquisar mensagens..."
+                className="flex-1 bg-[var(--surface-2)] rounded-full px-4 py-2 text-sm"
+                autoFocus
+              />
+              <button
+                onClick={() => {
+                  setShowSearch(false);
+                  setSearchQuery("");
+                }}
+                className="press grid size-8 place-items-center rounded-full hover:bg-[var(--surface-2)] transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+          ) : (
+            <>
+              <Avatar
+                src={friend?.avatar_url}
+                name={friend?.display_name}
+                size="sm"
+                online={online}
+              />
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate font-bold text-base">
+                  {friend?.display_name || "Conversa"}
+                </h1>
+                <p className="text-xs muted flex items-center gap-1">
+                  {typing ? (
+                    <>
+                      <span className="flex gap-0.5">
+                        <span className="typing-dot size-1 rounded-full bg-[var(--brand)]" />
+                        <span className="typing-dot size-1 rounded-full bg-[var(--brand)]" />
+                        <span className="typing-dot size-1 rounded-full bg-[var(--brand)]" />
+                      </span>
+                      <span>a escrever…</span>
+                    </>
+                  ) : online ? (
+                    <>
+                      <span className="size-2 rounded-full bg-green-500" />
+                      online
+                    </>
+                  ) : friend?.last_seen ? (
+                    `visto ${new Date(friend.last_seen).toLocaleString("pt-PT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`
+                  ) : (
+                    "offline"
+                  )}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowSearch(true)}
+                className="press grid size-10 place-items-center rounded-full hover:bg-[var(--surface-2)] transition-colors"
+              >
+                <Search size={20} />
+              </button>
+            </>
+          )}
         </header>
         <section className="no-scrollbar flex-1 overflow-y-auto px-3 py-4">
           {loading ? (
@@ -278,7 +413,12 @@ export default function Chat() {
             </div>
           ) : (
             <div className="space-y-2">
-              {messages.map((m, i) => {
+              {filteredMessages.length === 0 && searchQuery ? (
+                <div className="grid h-full place-items-center text-center">
+                  <p className="muted">Nenhuma mensagem encontrada</p>
+                </div>
+              ) : null}
+              {filteredMessages.map((m, i) => {
                 const own = m.sender_id === user?.id,
                   day = new Date(m.created_at).toLocaleDateString("pt-PT", {
                     day: "numeric",
@@ -286,7 +426,7 @@ export default function Chat() {
                     year: "numeric",
                   }),
                   prev = i
-                    ? new Date(messages[i - 1].created_at).toLocaleDateString(
+                    ? new Date(filteredMessages[i - 1].created_at).toLocaleDateString(
                         "pt-PT",
                         { day: "numeric", month: "long", year: "numeric" },
                       )
@@ -299,19 +439,33 @@ export default function Chat() {
                       </div>
                     )}
                     <div
-                      className={`group flex ${own ? "justify-end" : "justify-start"}`}
+                      className={`group flex ${own ? "justify-end" : "justify-start"} message-enter`}
                     >
                       <div
-                        className={`max-w-[85%] rounded-[24px] px-4 py-3 shadow-sm ${own ? "rounded-br-sm bg-gradient-to-br from-[var(--brand)] to-[var(--brand)]/90 text-white" : "rounded-bl-sm bg-[var(--surface)] border border-[var(--border)]"}`}
+                        className={`max-w-[85%] rounded-[24px] px-4 py-3 shadow-sm relative ${own ? "rounded-br-sm bg-gradient-to-br from-[var(--brand)] to-[var(--brand)]/90 text-white" : "rounded-bl-sm bg-[var(--surface)] border border-[var(--line)]"}`}
+                        onDoubleClick={() => handleDoubleTap(m)}
                       >
                         {m.reply_to_message_id && (
                           <div
                             className={`mb-2.5 rounded-xl border-l-3 p-2.5 text-xs ${own ? "border-white/60 bg-white/10" : "border-[var(--brand)]/50 bg-[var(--surface-2)]"}`}
                           >
-                            <div className="flex items-center gap-1.5 font-medium">
+                            <div className="flex items-center gap-1.5 font-medium mb-1">
                               <Reply size={11} />
-                              Resposta a uma mensagem
+                              <span className="opacity-75">Respondendo a</span>
                             </div>
+                            {m.reply ? (
+                              <div className="truncate opacity-90">
+                                {m.reply.message_type === "image" ? (
+                                  <span className="flex items-center gap-1">
+                                    📷 Fotografia
+                                  </span>
+                                ) : (
+                                  m.reply.message_text || "Mensagem"
+                                )}
+                              </div>
+                            ) : (
+                              <div className="opacity-60">Carregando...</div>
+                            )}
                           </div>
                         )}
                         {m.message_type === "image" && m.signed_image_url && (
@@ -333,6 +487,11 @@ export default function Chat() {
                                 loading="lazy"
                               />
                             </button>
+                          </div>
+                        )}
+                        {m.reaction && (
+                          <div className="absolute -bottom-2 -right-2 size-8 rounded-full bg-[var(--brand)] flex items-center justify-center text-white shadow-lg animate-in zoom-in-95 duration-200">
+                            <span className="text-lg">{m.reaction}</span>
                           </div>
                         )}
                         {m.message_text && (
@@ -367,21 +526,31 @@ export default function Chat() {
                             Responder
                           </button>
                           {m.message_type === "text" && (
-                            <button
-                              onClick={() =>
-                                navigator.clipboard.writeText(
-                                  m.message_text || "",
-                                )
-                              }
-                              className="flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity"
-                            >
-                              <Copy size={11} />
-                              Copiar
-                            </button>
+                            <>
+                              <button
+                                onClick={() =>
+                                  navigator.clipboard.writeText(
+                                    m.message_text || "",
+                                  )
+                                }
+                                className="flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity"
+                              >
+                                <Copy size={11} />
+                                Copiar
+                              </button>
+                              {own && (
+                                <button
+                                  onClick={() => startEdit(m)}
+                                  className="flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity"
+                                >
+                                  ✏️ Editar
+                                </button>
+                              )}
+                            </>
                           )}
                           {own && (
                             <button
-                              onClick={() => remove(m)}
+                              onClick={() => setDeleteConfirm(m)}
                               className="ml-auto opacity-60 hover:opacity-100 transition-opacity"
                             >
                               <Trash2 size={11} />
@@ -398,19 +567,30 @@ export default function Chat() {
           )}
         </section>
         {reply && (
-          <div className="flex items-center border-t hairline bg-[var(--surface)] px-4 py-2 text-xs">
+          <div className="flex items-center border-t hairline bg-[var(--surface)] px-4 py-3 text-xs">
             <Reply size={14} className="mr-2 text-[var(--brand)]" />
-            <span className="min-w-0 flex-1 truncate">
+            <span className="min-w-0 flex-1 truncate font-medium">
               {reply.message_text || "Fotografia"}
             </span>
-            <button onClick={() => setReply(null)}>
-              <X size={16} />
+            <button onClick={() => setReply(null)} className="press grid size-6 place-items-center rounded-full hover:bg-[var(--surface-2)] transition-colors">
+              <X size={14} />
             </button>
           </div>
         )}
-        <footer className="safe-bottom flex items-end gap-1 border-t hairline bg-[var(--surface)] px-2 pt-2">
+        {editing && (
+          <div className="flex items-center border-t hairline bg-[var(--surface)] px-4 py-3 text-xs">
+            <span className="mr-2 text-[var(--brand)]">✏️</span>
+            <span className="min-w-0 flex-1 truncate font-medium">
+              A editar mensagem
+            </span>
+            <button onClick={cancelEdit} className="press grid size-6 place-items-center rounded-full hover:bg-[var(--surface-2)] transition-colors">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+        <footer className="safe-bottom flex items-end gap-2 border-t hairline bg-[var(--surface)] px-3 pt-3">
           <ImagePicker onSend={sendImage} />
-          <div className="flex min-h-11 flex-1 items-end rounded-[22px] bg-[var(--surface-2)] px-3">
+          <div className="flex min-h-11 flex-1 items-end rounded-[24px] bg-[var(--surface-2)] px-4 shadow-inner">
             <textarea
               rows={1}
               value={text}
@@ -429,7 +609,7 @@ export default function Chat() {
             onClick={sendText}
             disabled={!text.trim() || sending}
             aria-label="Enviar"
-            className="press grid size-11 place-items-center rounded-full bg-[var(--brand)] text-white disabled:opacity-35"
+            className="press grid size-11 place-items-center rounded-full bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-white shadow-lg shadow-[var(--brand)]/25 disabled:opacity-35 disabled:shadow-none"
           >
             {sending ? (
               <LoaderCircle size={19} className="animate-spin" />
@@ -461,6 +641,36 @@ export default function Chat() {
               >
                 <Download size={22} />
               </a>
+            </div>
+          </div>
+        )}
+        {deleteConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="mx-auto w-full max-w-[340px] rounded-[28px] bg-[var(--surface)] p-6 shadow-2xl">
+              <h3 className="text-lg font-bold mb-2">Apagar mensagem</h3>
+              <p className="text-sm muted mb-6">
+                Queres apagar esta mensagem apenas para ti ou para ambos?
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => remove(deleteConfirm, false)}
+                  className="flex-1 rounded-xl bg-[var(--surface-2)] py-3 font-semibold press hover:bg-[var(--surface-2)]/80 transition-colors"
+                >
+                  Só para mim
+                </button>
+                <button
+                  onClick={() => remove(deleteConfirm, true)}
+                  className="flex-1 rounded-xl bg-red-500 py-3 font-semibold text-white press hover:bg-red-600 transition-colors"
+                >
+                  Para ambos
+                </button>
+              </div>
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="mt-3 w-full rounded-xl py-3 text-sm muted press hover:bg-[var(--surface-2)] transition-colors"
+              >
+                Cancelar
+              </button>
             </div>
           </div>
         )}
