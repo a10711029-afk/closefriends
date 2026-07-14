@@ -3,11 +3,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
+  Camera,
   CheckCheck,
   Copy,
   Download,
   LoaderCircle,
+  MapPin,
   MessageCircle,
+  Mic,
   Reply,
   Search,
   Send,
@@ -20,6 +23,8 @@ import { toast } from "sonner";
 import { AuthGate } from "@/components/auth/auth-gate";
 import { Avatar } from "@/components/ui/avatar";
 import { ImagePicker } from "@/components/chat/image-picker";
+import { VoiceRecorder } from "@/components/chat/voice-recorder";
+import { LocationPicker } from "@/components/chat/location-picker";
 import { useSession } from "@/hooks/use-session";
 import type { Message, Profile } from "@/lib/database.types";
 export default function Chat() {
@@ -33,13 +38,16 @@ export default function Chat() {
     [typing, setTyping] = useState(false),
     [reply, setReply] = useState<Message | null>(null),
     [lightbox, setLightbox] = useState<string | null>(null),
+    [lightboxMessage, setLightboxMessage] = useState<Message | null>(null),
     [now, setNow] = useState(0),
     [deleteConfirm, setDeleteConfirm] = useState<Message | null>(null),
     [editing, setEditing] = useState<Message | null>(null),
     [editText, setEditText] = useState(""),
     [doubleTapTimer, setDoubleTapTimer] = useState<ReturnType<typeof setTimeout> | null>(null),
     [searchQuery, setSearchQuery] = useState(""),
-    [showSearch, setShowSearch] = useState(false);
+    [showSearch, setShowSearch] = useState(false),
+    [isRecording, setIsRecording] = useState(false),
+    [showLocationPicker, setShowLocationPicker] = useState(false);
   const bottom = useRef<HTMLDivElement>(null),
     typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydrateImages = useCallback(
@@ -54,6 +62,14 @@ export default function Chat() {
             signedUrl = data?.signedUrl;
           }
           
+          let signedVoiceUrl = m.signed_voice_url;
+          if (m.message_type === "voice" && m.voice_url && !signedVoiceUrl) {
+            const { data } = await supabase.storage
+              .from("chat-voice")
+              .createSignedUrl(m.voice_url, 3600);
+            signedVoiceUrl = data?.signedUrl;
+          }
+          
           let replyData = m.reply;
           if (m.reply_to_message_id && !replyData) {
             const { data: replyMsg } = await supabase
@@ -64,7 +80,7 @@ export default function Chat() {
             replyData = replyMsg as Pick<Message, "id" | "message_text" | "message_type"> | null;
           }
           
-          return { ...m, signed_image_url: signedUrl, reply: replyData };
+          return { ...m, signed_image_url: signedUrl, signed_voice_url: signedVoiceUrl, reply: replyData };
         }),
       ),
     [supabase],
@@ -228,6 +244,57 @@ export default function Chat() {
       throw error;
     }
     setReply(null);
+  }
+
+  async function sendVoice(file: File) {
+    if (!user) return;
+    const messageId = crypto.randomUUID(),
+      path = `${id}/${messageId}.webm`;
+    const { error: uploadError } = await supabase.storage
+      .from("chat-voice")
+      .upload(path, file, { contentType: "audio/webm", upsert: false });
+    if (uploadError) {
+      toast.error("O upload falhou. Tenta novamente.");
+      throw uploadError;
+    }
+    const { error } = await supabase
+      .from("messages")
+      .insert({
+        id: messageId,
+        conversation_id: id,
+        sender_id: user.id,
+        message_type: "voice",
+        voice_url: path,
+        reply_to_message_id: reply?.id || null,
+      });
+    if (error) {
+      await supabase.storage.from("chat-voice").remove([path]);
+      toast.error("Mensagem de voz não enviada.");
+      throw error;
+    }
+    setReply(null);
+  }
+
+  async function sendLocation(location: { lat: number; lng: number; address?: string }) {
+    if (!user) return;
+    const { error } = await supabase
+      .from("messages")
+      .insert({
+        id: crypto.randomUUID(),
+        conversation_id: id,
+        sender_id: user.id,
+        message_type: "location",
+        location_lat: location.lat,
+        location_lng: location.lng,
+        location_address: location.address || null,
+        reply_to_message_id: reply?.id || null,
+      });
+    if (error) {
+      toast.error("Localização não enviada.");
+      throw error;
+    }
+    setReply(null);
+    setShowLocationPicker(false);
   }
   function announceTyping(value: string) {
     setText(value);
@@ -470,23 +537,59 @@ export default function Chat() {
                         )}
                         {m.message_type === "image" && m.signed_image_url && (
                           <div className="relative">
-                            {m.view_once && (
-                              <div className="absolute top-2 right-2 z-10 flex items-center gap-1.5 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-medium text-white backdrop-blur-sm">
-                                <span className="size-1.5 rounded-full bg-red-500 animate-pulse" />
-                                Visualização única
-                              </div>
+                            {m.view_once ? (
+                              <button
+                                onClick={() => {
+                                  setLightbox(m.signed_image_url!);
+                                  setLightboxMessage(m);
+                                }}
+                                className="mb-2.5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] py-4 text-white shadow-sm press"
+                              >
+                                <Camera size={20} />
+                                <span className="font-medium">Ver foto</span>
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => setLightbox(m.signed_image_url!)}
+                                className="mb-2.5 block overflow-hidden rounded-2xl shadow-sm"
+                              >
+                                <img
+                                  src={m.signed_image_url}
+                                  alt={m.image_caption || "Fotografia"}
+                                  className="max-h-72 w-full object-cover"
+                                  loading="lazy"
+                                />
+                              </button>
                             )}
-                            <button
-                              onClick={() => setLightbox(m.signed_image_url!)}
-                              className="mb-2.5 block overflow-hidden rounded-2xl shadow-sm"
+                          </div>
+                        )}
+                        {m.message_type === "voice" && m.signed_voice_url && (
+                          <div className="mb-2.5">
+                            <audio 
+                              src={m.signed_voice_url} 
+                              controls 
+                              className="w-full"
+                            />
+                          </div>
+                        )}
+                        {m.message_type === "location" && m.location_lat && m.location_lng && (
+                          <div className="mb-2.5">
+                            <a
+                              href={`https://www.google.com/maps?q=${m.location_lat},${m.location_lng}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-3 rounded-2xl bg-[var(--surface-2)] p-4 press hover:bg-[var(--surface-2)]/80 transition-colors"
                             >
-                              <img
-                                src={m.signed_image_url}
-                                alt={m.image_caption || "Fotografia"}
-                                className="max-h-72 w-full object-cover"
-                                loading="lazy"
-                              />
-                            </button>
+                              <div className="grid size-12 place-items-center rounded-full bg-[var(--brand)] text-white">
+                                <MapPin size={20} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-sm">Localização partilhada</p>
+                                {m.location_address && (
+                                  <p className="text-xs muted truncate">{m.location_address}</p>
+                                )}
+                              </div>
+                            </a>
                           </div>
                         )}
                         {m.reaction && (
@@ -590,6 +693,13 @@ export default function Chat() {
         )}
         <footer className="safe-bottom flex items-end gap-2 border-t hairline bg-[var(--surface)] px-3 pt-3">
           <ImagePicker onSend={sendImage} />
+          <button
+            onClick={() => setShowLocationPicker(true)}
+            aria-label="Partilhar localização"
+            className="press grid size-11 place-items-center rounded-full text-[var(--brand)] hover:bg-[var(--surface-2)] transition-colors"
+          >
+            <MapPin size={19} />
+          </button>
           <div className="flex min-h-11 flex-1 items-end rounded-[24px] bg-[var(--surface-2)] px-4 shadow-inner">
             <textarea
               rows={1}
@@ -606,6 +716,13 @@ export default function Chat() {
             />
           </div>
           <button
+            onClick={() => setIsRecording(!isRecording)}
+            aria-label="Gravar voz"
+            className="press grid size-11 place-items-center rounded-full text-[var(--brand)] hover:bg-[var(--surface-2)] transition-colors"
+          >
+            <Mic size={19} />
+          </button>
+          <button
             onClick={sendText}
             disabled={!text.trim() || sending}
             aria-label="Enviar"
@@ -618,10 +735,22 @@ export default function Chat() {
             )}
           </button>
         </footer>
+        {isRecording && (
+          <VoiceRecorder onSend={sendVoice} />
+        )}
+        {showLocationPicker && (
+          <LocationPicker
+            onSend={sendLocation}
+            onClose={() => setShowLocationPicker(false)}
+          />
+        )}
         {lightbox && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black animate-in fade-in duration-200">
             <button
-              onClick={() => setLightbox(null)}
+              onClick={() => {
+                setLightbox(null);
+                setLightboxMessage(null);
+              }}
               className="absolute right-4 top-[max(18px,env(safe-area-inset-top))] grid size-11 place-items-center rounded-full bg-black/40 backdrop-blur-md text-white press"
             >
               <X size={24} />
@@ -634,13 +763,27 @@ export default function Chat() {
               />
             </div>
             <div className="absolute bottom-[max(24px,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 flex gap-4">
-              <a
-                href={lightbox}
-                download
-                className="grid size-12 place-items-center rounded-full bg-white/20 backdrop-blur-md text-white press hover:bg-white/30 transition-colors"
-              >
-                <Download size={22} />
-              </a>
+              {lightboxMessage?.view_once && (
+                <button
+                  onClick={() => {
+                    setReply(lightboxMessage);
+                    setLightbox(null);
+                    setLightboxMessage(null);
+                  }}
+                  className="grid size-12 place-items-center rounded-full bg-white/20 backdrop-blur-md text-white press hover:bg-white/30 transition-colors"
+                >
+                  <Camera size={22} />
+                </button>
+              )}
+              {!lightboxMessage?.view_once && (
+                <a
+                  href={lightbox}
+                  download
+                  className="grid size-12 place-items-center rounded-full bg-white/20 backdrop-blur-md text-white press hover:bg-white/30 transition-colors"
+                >
+                  <Download size={22} />
+                </a>
+              )}
             </div>
           </div>
         )}

@@ -1,9 +1,10 @@
 "use client";
 import { useRef, useState } from "react";
 import imageCompression from "browser-image-compression";
-import { Camera, ImagePlus, LoaderCircle, Send, X } from "lucide-react";
+import { Camera, Edit, ImagePlus, LoaderCircle, Send, X } from "lucide-react";
 import { toast } from "sonner";
 import { CustomCamera } from "./custom-camera";
+import { PhotoEditor } from "./photo-editor";
 
 export function ImagePicker({ onSend }: { onSend: (file: File, caption: string, viewOnce?: boolean) => Promise<void> }) {
   const gallery = useRef<HTMLInputElement>(null);
@@ -14,6 +15,7 @@ export function ImagePicker({ onSend }: { onSend: (file: File, caption: string, 
   const [showCamera, setShowCamera] = useState(false);
   const [fromCamera, setFromCamera] = useState(false);
   const [viewOnce, setViewOnce] = useState(false);
+  const [showEditor, setShowEditor] = useState(false);
 
   async function handleCameraCapture(capturedFile: File) {
     setShowCamera(false);
@@ -29,11 +31,18 @@ export function ImagePicker({ onSend }: { onSend: (file: File, caption: string, 
       });
       setFile(compressed);
       setPreview(URL.createObjectURL(compressed));
+      setShowEditor(true);
     } catch {
       toast.error("Não foi possível preparar a fotografia.");
     } finally {
       setBusy(false);
     }
+  }
+
+  function handleEditedImage(editedFile: File) {
+    setFile(editedFile);
+    setPreview(URL.createObjectURL(editedFile));
+    setShowEditor(false);
   }
 
   async function choose(list: FileList | null) {
@@ -51,6 +60,7 @@ export function ImagePicker({ onSend }: { onSend: (file: File, caption: string, 
       });
       setFile(compressed);
       setPreview(URL.createObjectURL(compressed));
+      setShowEditor(true);
     } catch {
       toast.error("Não foi possível preparar a fotografia.");
     } finally {
@@ -79,6 +89,13 @@ export function ImagePicker({ onSend }: { onSend: (file: File, caption: string, 
         <CustomCamera
           onCapture={handleCameraCapture}
           onClose={() => setShowCamera(false)}
+        />
+      )}
+      {showEditor && preview && (
+        <PhotoEditor
+          imageSrc={preview}
+          onSave={handleEditedImage}
+          onClose={() => setShowEditor(false)}
         />
       )}
       <div className="flex gap-1">

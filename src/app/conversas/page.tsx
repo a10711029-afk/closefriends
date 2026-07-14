@@ -12,19 +12,38 @@ import { AppShell } from "@/components/app-shell";
 import { Avatar } from "@/components/ui/avatar";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingList } from "@/components/ui/loading";
+import { StoriesBar } from "@/components/stories/stories-bar";
+import { StoryViewer } from "@/components/stories/story-viewer";
 import { useSession } from "@/hooks/use-session";
 import type { ConversationPreview } from "@/lib/database.types";
+import type { Story } from "@/lib/database.types";
 import { timeAgo } from "@/lib/utils";
 export default function Conversas() {
   const { user, supabase } = useSession();
   const [items, setItems] = useState<ConversationPreview[]>([]),
     [loading, setLoading] = useState(true),
     [query, setQuery] = useState(""),
-    [now, setNow] = useState(0);
+    [now, setNow] = useState(0),
+    [stories, setStories] = useState<Story[]>([]),
+    [viewingStory, setViewingStory] = useState<Story | null>(null),
+    [storyIndex, setStoryIndex] = useState(0);
   const load = useCallback(async () => {
     if (!user) return;
     const { data, error } = await supabase.rpc("get_my_conversations");
     if (!error) setItems((data || []) as ConversationPreview[]);
+    
+    // Load stories
+    const { data: storiesData, error: storiesError } = await supabase
+      .from("stories")
+      .select(`
+        *,
+        user:profiles!user_id(id, username, display_name, avatar_url)
+      `)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: false });
+    
+    if (!storiesError) setStories(storiesData || []);
+    
     setLoading(false);
   }, [user, supabase]);
   useEffect(() => {
@@ -84,6 +103,17 @@ export default function Conversas() {
           />
         </label>
       </header>
+      <StoriesBar
+        onStoryClick={(story) => {
+          const index = stories.findIndex(s => s.id === story.id);
+          setStoryIndex(index >= 0 ? index : 0);
+          setViewingStory(story);
+        }}
+        onCreateStory={() => {
+          // TODO: Implement story creation
+          console.log("Create story");
+        }}
+      />
       <section className="px-3 pt-2">
         {loading ? (
           <LoadingList />
@@ -157,6 +187,13 @@ export default function Conversas() {
           </div>
         )}
       </section>
+      {viewingStory && stories.length > 0 && (
+        <StoryViewer
+          stories={stories}
+          initialIndex={storyIndex}
+          onClose={() => setViewingStory(null)}
+        />
+      )}
     </AppShell>
   );
 }
