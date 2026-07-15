@@ -1,16 +1,18 @@
 "use client";
 import { useState, useEffect } from "react";
-import { MapPin, X, LoaderCircle } from "lucide-react";
+import { MapPin, X, LoaderCircle, RefreshCw } from "lucide-react";
+
+type SharedLocation = { lat: number; lng: number; address?: string; accuracy?: number };
 
 interface LocationPickerProps {
-  onSend: (location: { lat: number; lng: number; address?: string }) => void;
+  onSend: (location: SharedLocation) => void;
   onClose: () => void;
 }
 
 export function LocationPicker({ onSend, onClose }: LocationPickerProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [location, setLocation] = useState<{ lat: number; lng: number; address?: string } | null>(null);
+  const [location, setLocation] = useState<SharedLocation | null>(null);
 
   const getCurrentLocation = () => {
     setLoading(true);
@@ -24,7 +26,7 @@ export function LocationPicker({ onSend, onClose }: LocationPickerProps) {
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
-        const { latitude, longitude } = position.coords;
+        const { latitude, longitude, accuracy } = position.coords;
         
         // Try to get address using reverse geocoding (using OpenStreetMap Nominatim)
         try {
@@ -37,11 +39,13 @@ export function LocationPicker({ onSend, onClose }: LocationPickerProps) {
             lat: latitude,
             lng: longitude,
             address: data.display_name || undefined,
+            accuracy,
           });
         } catch {
           setLocation({
             lat: latitude,
             lng: longitude,
+            accuracy,
           });
         }
         
@@ -55,9 +59,9 @@ export function LocationPicker({ onSend, onClose }: LocationPickerProps) {
         setLoading(false);
       },
       {
-        enableHighAccuracy: false,
-        timeout: 15000,
-        maximumAge: 30000,
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 0,
       }
     );
   };
@@ -121,6 +125,14 @@ export function LocationPicker({ onSend, onClose }: LocationPickerProps) {
           <h3 className="text-lg font-bold mb-2">Partilhar Localização</h3>
           {location?.address && (
             <p className="text-sm muted line-clamp-2">{location.address}</p>
+          )}
+          {location?.accuracy && (
+            <div className="mt-3 flex items-center justify-center gap-2 text-xs muted">
+              <span>Precisão aproximada: {Math.round(location.accuracy)} m</span>
+              <button onClick={getCurrentLocation} className="press inline-flex items-center gap-1 font-semibold text-[var(--brand)]">
+                <RefreshCw size={12} /> Atualizar
+              </button>
+            </div>
           )}
         </div>
 

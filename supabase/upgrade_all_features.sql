@@ -78,7 +78,22 @@ create policy "stories visible to friends" on storage.objects for select to auth
 create policy "story owner delete" on storage.objects for delete to authenticated
   using (bucket_id = 'stories' and (storage.foldername(name))[1] = auth.uid()::text);
 
-alter table public.messages drop constraint if exists messages_message_type_check;
+-- Remove todas as constraints antigas ligadas ao tipo de mensagem, incluindo
+-- a constraint sem nome explícito criada pela primeira versão da aplicação.
+do $$
+declare constraint_row record;
+begin
+  for constraint_row in
+    select conname
+    from pg_constraint
+    where conrelid = 'public.messages'::regclass
+      and contype = 'c'
+      and pg_get_constraintdef(oid) ilike '%message_type%'
+  loop
+    execute format('alter table public.messages drop constraint %I', constraint_row.conname);
+  end loop;
+end $$;
+
 alter table public.messages add constraint messages_message_type_check check (
   deleted_at is not null
   or (message_type = 'text' and message_text is not null and length(trim(message_text)) > 0 and image_url is null and voice_url is null and location_lat is null and location_lng is null)
