@@ -12,6 +12,8 @@ import {
   MapPin,
   MessageCircle,
   Mic,
+  MoreHorizontal,
+  Pencil,
   Reply,
   Search,
   Send,
@@ -48,6 +50,7 @@ export default function Chat() {
     [doubleTapTimer, setDoubleTapTimer] = useState<ReturnType<typeof setTimeout> | null>(null),
     [searchQuery, setSearchQuery] = useState(""),
     [showSearch, setShowSearch] = useState(false),
+    [messageMenu, setMessageMenu] = useState<string | null>(null),
     [isRecording, setIsRecording] = useState(false),
     [recordingGesture, setRecordingGesture] = useState<{ x: number; y: number } | null>(null),
     [showLocationPicker, setShowLocationPicker] = useState(false),
@@ -637,10 +640,11 @@ export default function Chat() {
                       }}
                       onTouchEnd={(event) => finishSwipe(event, m)}
                     >
-                      <div
-                        className={`max-w-[85%] rounded-[24px] px-4 py-3 shadow-sm relative transition-all duration-200 hover:shadow-md ${own ? "rounded-br-sm bg-gradient-to-br from-[var(--brand)] to-[var(--brand)]/90 text-white" : "rounded-bl-sm bg-[var(--surface)] border border-[var(--line)]"}`}
-                        onDoubleClick={() => handleDoubleTap(m)}
-                      >
+                      <div className={`flex max-w-[82%] flex-col ${own ? "items-end" : "items-start"}`}>
+                        <div
+                          className={`relative min-w-24 rounded-[20px] px-3.5 py-2.5 shadow-sm transition-shadow duration-200 hover:shadow-md ${own ? "rounded-br-md bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-white" : "rounded-bl-md border border-[var(--line)] bg-[var(--surface)]"}`}
+                          onDoubleClick={() => handleDoubleTap(m)}
+                        >
                         {m.reply_to_message_id && (
                           <div
                             className={`mb-2.5 rounded-xl border-l-3 p-2.5 text-xs ${own ? "border-white/60 bg-white/10" : "border-[var(--brand)]/50 bg-[var(--surface-2)]"}`}
@@ -729,9 +733,14 @@ export default function Chat() {
                             {m.message_text}
                           </p>
                         )}
-                        <div
-                          className={`mt-2 flex items-center justify-end gap-1.5 text-[10px] ${own ? "text-white/75" : "muted"}`}
-                        >
+                        <div className={`mt-1.5 flex items-center justify-end gap-1 text-[10px] ${own ? "text-white/70" : "muted"}`}>
+                          <button
+                            onClick={() => setMessageMenu(messageMenu === m.id ? null : m.id)}
+                            aria-label="Opções da mensagem"
+                            className={`press mr-1 grid size-5 place-items-center rounded-full ${own ? "hover:bg-white/15" : "hover:bg-[var(--surface-2)]"}`}
+                          >
+                            <MoreHorizontal size={14} />
+                          </button>
                           <time>
                             {new Date(m.created_at).toLocaleTimeString(
                               "pt-PT",
@@ -745,48 +754,45 @@ export default function Chat() {
                             />
                           )}
                         </div>
-                        <div
-                          className={`mt-2 flex gap-3 border-t pt-2 text-[10px] ${own ? "border-white/15" : "hairline"}`}
-                        >
+                        </div>
+                        {messageMenu === m.id && (
+                          <div className="mt-1.5 flex max-w-full flex-wrap items-center gap-1 rounded-2xl border hairline bg-[var(--surface)] p-1.5 text-[var(--ink)] shadow-xl animate-in fade-in slide-in-from-top-1 duration-150">
                           <button
-                            onClick={() => setReply(m)}
-                            className="flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity"
+                            onClick={() => { setReply(m); setMessageMenu(null); }}
+                            className="press flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-xs font-semibold hover:bg-[var(--surface-2)]"
                           >
-                            <Reply size={11} />
+                            <Reply size={14} className="text-[var(--brand)]" />
                             Responder
                           </button>
                           {m.message_type === "text" && (
                             <>
                               <button
-                                onClick={() =>
-                                  navigator.clipboard.writeText(
-                                    m.message_text || "",
-                                  )
-                                }
-                                className="flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity"
+                                onClick={() => { void navigator.clipboard.writeText(m.message_text || ""); setMessageMenu(null); }}
+                                className="press flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-xs font-semibold hover:bg-[var(--surface-2)]"
                               >
-                                <Copy size={11} />
+                                <Copy size={14} />
                                 Copiar
                               </button>
                               {own && (
                                 <button
-                                  onClick={() => startEdit(m)}
-                                  className="flex items-center gap-1.5 opacity-60 hover:opacity-100 transition-opacity"
+                                  onClick={() => { startEdit(m); setMessageMenu(null); }}
+                                  className="press flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-xs font-semibold hover:bg-[var(--surface-2)]"
                                 >
-                                  ✏️ Editar
+                                  <Pencil size={14} /> Editar
                                 </button>
                               )}
                             </>
                           )}
                           {own && (
                             <button
-                              onClick={() => setDeleteConfirm(m)}
-                              className="ml-auto opacity-60 hover:opacity-100 transition-opacity"
+                              onClick={() => { setDeleteConfirm(m); setMessageMenu(null); }}
+                              className="press flex items-center gap-1.5 rounded-xl px-2.5 py-2 text-xs font-semibold text-red-500 hover:bg-red-500/10"
                             >
-                              <Trash2 size={11} />
+                              <Trash2 size={14} /> Apagar
                             </button>
                           )}
-                        </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
