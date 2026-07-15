@@ -1,10 +1,11 @@
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
   Camera,
   CheckCheck,
+  ChevronDown,
   Copy,
   Download,
   LoaderCircle,
@@ -46,9 +47,22 @@ export default function Chat() {
     [searchQuery, setSearchQuery] = useState(""),
     [showSearch, setShowSearch] = useState(false),
     [isRecording, setIsRecording] = useState(false),
-    [showLocationPicker, setShowLocationPicker] = useState(false);
+    [showLocationPicker, setShowLocationPicker] = useState(false),
+    [isNearBottom, setIsNearBottom] = useState(true),
+    [hasNewMessages, setHasNewMessages] = useState(false);
   const bottom = useRef<HTMLDivElement>(null),
+    scrollArea = useRef<HTMLElement>(null),
+    initialScrollDone = useRef(false),
+    previousMessageCount = useRef(0),
     typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scrollToLatest = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const area = scrollArea.current;
+    if (!area) return;
+    area.scrollTo({ top: area.scrollHeight, behavior });
+    setIsNearBottom(true);
+    setHasNewMessages(false);
+  }, []);
   const hydrateImages = useCallback(
     async (rows: Message[]) =>
       Promise.all(
@@ -186,8 +200,37 @@ export default function Chat() {
     };
   }, [load, user, supabase, id, hydrateImages]);
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, typing]);
+    initialScrollDone.current = false;
+    previousMessageCount.current = 0;
+    setHasNewMessages(false);
+  }, [id]);
+
+  useLayoutEffect(() => {
+    if (loading || initialScrollDone.current || searchQuery) return;
+    initialScrollDone.current = true;
+    previousMessageCount.current = messages.length;
+    scrollToLatest("auto");
+    const timer = window.setTimeout(() => scrollToLatest("auto"), 120);
+    return () => window.clearTimeout(timer);
+  }, [loading, messages.length, scrollToLatest, searchQuery]);
+
+  useEffect(() => {
+    if (!initialScrollDone.current || messages.length <= previousMessageCount.current) {
+      previousMessageCount.current = messages.length;
+      return;
+    }
+    const latest = messages[messages.length - 1];
+    previousMessageCount.current = messages.length;
+    if (!searchQuery && (isNearBottom || latest?.sender_id === user?.id)) {
+      window.requestAnimationFrame(() => scrollToLatest("smooth"));
+    } else if (!searchQuery) {
+      setHasNewMessages(true);
+    }
+  }, [messages, isNearBottom, scrollToLatest, searchQuery, user?.id]);
+
+  useEffect(() => {
+    if (typing && isNearBottom && !searchQuery) scrollToLatest("smooth");
+  }, [typing, isNearBottom, scrollToLatest, searchQuery]);
   async function sendText() {
     if (editing) {
       await editMessage();
@@ -419,7 +462,7 @@ export default function Chat() {
     : messages;
   return (
     <AuthGate>
-      <main className="app-frame flex h-dvh flex-col overflow-hidden">
+      <main className="app-frame relative flex h-dvh flex-col overflow-hidden">
         <header className="safe-top z-20 flex items-center gap-3 border-b hairline px-4 pb-3 glass">
           <Link
             href="/conversas"
@@ -489,7 +532,16 @@ export default function Chat() {
             </>
           )}
         </header>
-        <section className="chat-canvas no-scrollbar flex-1 overflow-y-auto px-3 py-4">
+        <section
+          ref={scrollArea}
+          onScroll={(event) => {
+            const area = event.currentTarget;
+            const nearBottom = area.scrollHeight - area.scrollTop - area.clientHeight < 120;
+            setIsNearBottom(nearBottom);
+            if (nearBottom) setHasNewMessages(false);
+          }}
+          className="chat-canvas no-scrollbar flex-1 overflow-y-auto px-3 py-4"
+        >
           {loading ? (
             <div className="grid h-full place-items-center">
               <LoaderCircle className="animate-spin text-[var(--brand)]" />
@@ -693,6 +745,17 @@ export default function Chat() {
             </div>
           )}
         </section>
+        {!isNearBottom && !showSearch && (
+          <button
+            onClick={() => scrollToLatest("smooth")}
+            aria-label="Ir para as mensagens mais recentes"
+            className="press absolute bottom-24 right-4 z-20 flex items-center gap-2 rounded-full border hairline bg-[var(--surface)] px-3 py-2 text-xs font-semibold shadow-lg"
+          >
+            <ChevronDown size={17} className="text-[var(--brand)]" />
+            {hasNewMessages ? "Novas mensagens" : "Mais recentes"}
+            {hasNewMessages && <span className="size-2 rounded-full bg-[var(--coral)]" />}
+          </button>
+        )}
         {reply && (
           <div className="flex items-center border-t hairline bg-[var(--surface)] px-4 py-3 text-xs">
             <Reply size={14} className="mr-2 text-[var(--brand)]" />
