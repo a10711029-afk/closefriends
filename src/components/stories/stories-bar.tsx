@@ -2,7 +2,6 @@
 import { useState, useEffect } from "react";
 import { Plus } from "lucide-react";
 import { useSession } from "@/hooks/use-session";
-import { toast } from "sonner";
 
 interface Story {
   id: string;
@@ -28,10 +27,7 @@ export function StoriesBar({ onStoryClick, onCreateStory }: StoriesBarProps) {
   const { user, supabase } = useSession();
   const [stories, setStories] = useState<Story[]>([]);
   const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    loadStories();
-  }, [user, supabase]);
+  const [available, setAvailable] = useState(true);
 
   async function loadStories() {
     if (!user) return;
@@ -47,13 +43,20 @@ export function StoriesBar({ onStoryClick, onCreateStory }: StoriesBarProps) {
       .order("created_at", { ascending: false });
 
     if (error) {
-      toast.error("Não foi possível carregar stories.");
+      console.error("Stories unavailable:", error.message);
+      setAvailable(false);
+      setStories([]);
     } else {
+      setAvailable(true);
       setStories(data || []);
     }
 
     setLoading(false);
   }
+
+  useEffect(() => {
+    void loadStories();
+  }, [user, supabase]);
 
   if (loading) {
     return (
@@ -68,7 +71,7 @@ export function StoriesBar({ onStoryClick, onCreateStory }: StoriesBarProps) {
   }
 
   return (
-    <div className="flex gap-3 px-4 py-3 overflow-x-auto no-scrollbar border-b hairline">
+    <div className="flex gap-3 overflow-x-auto border-b hairline px-4 py-3 no-scrollbar">
       {/* Create Story Button */}
       <button
         onClick={onCreateStory}
@@ -79,7 +82,7 @@ export function StoriesBar({ onStoryClick, onCreateStory }: StoriesBarProps) {
             <Plus size={20} className="text-[var(--brand)]" />
           </div>
         </div>
-        <span className="text-xs">Criar</span>
+        <span className="text-xs">O teu story</span>
       </button>
 
       {/* Stories */}
@@ -101,6 +104,11 @@ export function StoriesBar({ onStoryClick, onCreateStory }: StoriesBarProps) {
           </span>
         </button>
       ))}
+      {!available && (
+        <div className="flex items-center pl-1 text-xs muted">
+          Os stories ficam disponíveis após a atualização da base de dados.
+        </div>
+      )}
     </div>
   );
 }

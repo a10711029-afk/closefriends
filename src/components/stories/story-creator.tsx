@@ -1,7 +1,8 @@
 "use client";
-import { useState, useRef } from "react";
-import { Camera, X, Send, LoaderCircle } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Camera, ImagePlus, X, LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
+import imageCompression from "browser-image-compression";
 import { CustomCamera } from "@/components/chat/custom-camera";
 import { useSession } from "@/hooks/use-session";
 
@@ -17,11 +18,34 @@ export function StoryCreator({ onClose, onSuccess }: StoryCreatorProps) {
   const [preview, setPreview] = useState<string | null>(null);
   const [caption, setCaption] = useState("");
   const [uploading, setUploading] = useState(false);
+  const galleryRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => () => {
+    if (preview) URL.revokeObjectURL(preview);
+  }, [preview]);
+
+  async function prepareImage(file: File) {
+    setUploading(true);
+    try {
+      const compressed = await imageCompression(file, {
+        maxSizeMB: 1,
+        maxWidthOrHeight: 1600,
+        useWebWorker: true,
+        fileType: "image/webp",
+        initialQuality: 0.84,
+      });
+      setImageFile(compressed);
+      setPreview(URL.createObjectURL(compressed));
+      setShowCamera(false);
+    } catch {
+      toast.error("Não foi possível preparar a fotografia.");
+    } finally {
+      setUploading(false);
+    }
+  }
 
   const handleCameraCapture = (file: File) => {
-    setImageFile(file);
-    setPreview(URL.createObjectURL(file));
-    setShowCamera(false);
+    void prepareImage(file);
   };
 
   const handleSend = async () => {
@@ -34,7 +58,7 @@ export function StoryCreator({ onClose, onSuccess }: StoryCreatorProps) {
       
       const { error: uploadError } = await supabase.storage
         .from("stories")
-        .upload(path, imageFile, { contentType: "image/webp", upsert: false });
+        .upload(path, imageFile, { contentType: imageFile.type || "image/webp", upsert: false });
       
       if (uploadError) {
         toast.error("O upload falhou. Tenta novamente.");
@@ -72,7 +96,7 @@ export function StoryCreator({ onClose, onSuccess }: StoryCreatorProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm">
-      <div className="mx-auto w-full max-w-[340px] rounded-[28px] bg-[var(--surface)] p-6 shadow-2xl">
+      <div className="relative mx-auto max-h-[calc(100dvh-24px)] w-[calc(100%-24px)] max-w-[380px] overflow-y-auto rounded-[28px] bg-[var(--surface)] p-6 shadow-2xl no-scrollbar">
         <button
           onClick={onClose}
           className="absolute right-4 top-4 grid size-8 place-items-center rounded-full bg-[var(--surface-2)] press"
@@ -82,14 +106,21 @@ export function StoryCreator({ onClose, onSuccess }: StoryCreatorProps) {
 
         <h3 className="text-lg font-bold mb-4 text-center">Criar Story</h3>
 
-        {!preview ? (
-          <button
-            onClick={() => setShowCamera(true)}
-            className="w-full aspect-[9/16] rounded-2xl bg-[var(--surface-2)] flex flex-col items-center justify-center gap-3 press hover:bg-[var(--surface-2)]/80 transition-colors"
-          >
-            <Camera size={48} className="text-[var(--brand)]" />
-            <span className="text-sm font-medium">Tirar fotografia</span>
-          </button>
+        {uploading && !preview ? (
+          <div className="grid aspect-[9/13] place-items-center rounded-2xl bg-[var(--surface-2)]">
+            <div className="text-center"><LoaderCircle className="mx-auto animate-spin text-[var(--brand)]" /><p className="mt-3 text-sm muted">A preparar fotografia…</p></div>
+          </div>
+        ) : !preview ? (
+          <div className="flex aspect-[9/13] w-full flex-col items-center justify-center rounded-2xl bg-[var(--surface-2)] p-6 text-center">
+            <div className="grid size-16 place-items-center rounded-full bg-[var(--surface)] text-[var(--brand)] shadow-sm"><Camera size={30} /></div>
+            <p className="mt-4 font-semibold">Partilha um momento</p>
+            <p className="mt-1 text-sm muted">Usa a câmara ou escolhe uma fotografia.</p>
+            <div className="mt-6 grid w-full grid-cols-2 gap-3">
+              <button onClick={() => setShowCamera(true)} className="press flex items-center justify-center gap-2 rounded-2xl bg-[var(--brand)] py-3 text-sm font-semibold text-white"><Camera size={18} />Câmara</button>
+              <button onClick={() => galleryRef.current?.click()} className="press flex items-center justify-center gap-2 rounded-2xl bg-[var(--surface)] py-3 text-sm font-semibold"><ImagePlus size={18} />Galeria</button>
+            </div>
+            <input ref={galleryRef} hidden type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void prepareImage(file); }} />
+          </div>
         ) : (
           <>
             <div className="aspect-[9/16] rounded-2xl overflow-hidden mb-4">

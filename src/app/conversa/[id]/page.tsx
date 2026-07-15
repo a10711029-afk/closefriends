@@ -16,7 +16,6 @@ import {
   Send,
   Trash2,
   X,
-  ZoomIn,
 } from "lucide-react";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
@@ -198,9 +197,11 @@ export default function Chat() {
     if (!body || !user || sending) return;
     setSending(true);
     setText("");
+    const messageId = crypto.randomUUID();
     const { error } = await supabase
       .from("messages")
       .insert({
+        id: messageId,
         conversation_id: id,
         sender_id: user.id,
         message_type: "text",
@@ -210,7 +211,7 @@ export default function Chat() {
     if (error) {
       setText(body);
       toast.error("Mensagem não enviada.");
-    }
+    } else notifyMessage(messageId, body);
     setReply(null);
     setSending(false);
   }
@@ -243,16 +244,18 @@ export default function Chat() {
       toast.error("Fotografia não enviada.");
       throw error;
     }
+    notifyMessage(messageId, caption.trim() || "Enviou uma fotografia");
     setReply(null);
   }
 
   async function sendVoice(file: File) {
     if (!user) return;
-    const messageId = crypto.randomUUID(),
-      path = `${id}/${messageId}.webm`;
+    const messageId = crypto.randomUUID();
+    const extension = file.type.includes("mp4") ? "m4a" : file.type.includes("ogg") ? "ogg" : "webm";
+    const path = `${id}/${messageId}.${extension}`;
     const { error: uploadError } = await supabase.storage
       .from("chat-voice")
-      .upload(path, file, { contentType: "audio/webm", upsert: false });
+      .upload(path, file, { contentType: file.type || "audio/webm", upsert: false });
     if (uploadError) {
       toast.error("O upload falhou. Tenta novamente.");
       throw uploadError;
@@ -272,15 +275,17 @@ export default function Chat() {
       toast.error("Mensagem de voz não enviada.");
       throw error;
     }
+    notifyMessage(messageId, "Enviou uma mensagem de voz");
     setReply(null);
   }
 
   async function sendLocation(location: { lat: number; lng: number; address?: string }) {
     if (!user) return;
+    const messageId = crypto.randomUUID();
     const { error } = await supabase
       .from("messages")
       .insert({
-        id: crypto.randomUUID(),
+        id: messageId,
         conversation_id: id,
         sender_id: user.id,
         message_type: "location",
@@ -293,8 +298,17 @@ export default function Chat() {
       toast.error("Localização não enviada.");
       throw error;
     }
+    notifyMessage(messageId, "Partilhou uma localização");
     setReply(null);
     setShowLocationPicker(false);
+  }
+  function notifyMessage(messageId: string, preview: string) {
+    void fetch("/api/notifications/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messageId, preview }),
+      keepalive: true,
+    });
   }
   function announceTyping(value: string) {
     setText(value);
@@ -692,14 +706,7 @@ export default function Chat() {
           </div>
         )}
         <footer className="safe-bottom flex items-end gap-2 border-t hairline bg-[var(--surface)] px-3 pt-3">
-          <ImagePicker onSend={sendImage} />
-          <button
-            onClick={() => setShowLocationPicker(true)}
-            aria-label="Partilhar localização"
-            className="press grid size-11 place-items-center rounded-full text-[var(--brand)] hover:bg-[var(--surface-2)] transition-colors"
-          >
-            <MapPin size={19} />
-          </button>
+          <ImagePicker onSend={sendImage} onLocation={() => setShowLocationPicker(true)} />
           <div className="flex min-h-11 flex-1 items-end rounded-[24px] bg-[var(--surface-2)] px-4 shadow-inner">
             <textarea
               rows={1}
@@ -715,28 +722,18 @@ export default function Chat() {
               placeholder="Mensagem…"
             />
           </div>
-          <button
-            onClick={() => setIsRecording(!isRecording)}
-            aria-label="Gravar voz"
-            className="press grid size-11 place-items-center rounded-full text-[var(--brand)] hover:bg-[var(--surface-2)] transition-colors"
-          >
-            <Mic size={19} />
-          </button>
-          <button
-            onClick={sendText}
-            disabled={!text.trim() || sending}
-            aria-label="Enviar"
-            className="press grid size-11 place-items-center rounded-full bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-white shadow-lg shadow-[var(--brand)]/25 disabled:opacity-35 disabled:shadow-none"
-          >
-            {sending ? (
-              <LoaderCircle size={19} className="animate-spin" />
-            ) : (
-              <Send size={19} />
-            )}
-          </button>
+          {text.trim() ? (
+            <button onClick={sendText} disabled={sending} aria-label="Enviar" className="press grid size-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] text-white shadow-lg shadow-[var(--brand)]/25 disabled:opacity-50">
+              {sending ? <LoaderCircle size={19} className="animate-spin" /> : <Send size={19} />}
+            </button>
+          ) : (
+            <button onClick={() => setIsRecording(true)} aria-label="Gravar voz" className="press grid size-11 shrink-0 place-items-center rounded-full bg-[var(--surface-2)] text-[var(--brand)]">
+              <Mic size={20} />
+            </button>
+          )}
         </footer>
         {isRecording && (
-          <VoiceRecorder onSend={sendVoice} />
+          <VoiceRecorder onSend={sendVoice} onClose={() => setIsRecording(false)} />
         )}
         {showLocationPicker && (
           <LocationPicker

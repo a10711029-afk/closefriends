@@ -1,12 +1,25 @@
 "use client";
 import { useRef, useState, useEffect } from "react";
-import { Mic, Send, X, LoaderCircle } from "lucide-react";
+import { CircleStop, Play, Send, Trash2, LoaderCircle } from "lucide-react";
+import { toast } from "sonner";
 
 interface VoiceRecorderProps {
   onSend: (audioFile: File) => Promise<void>;
+  onClose: () => void;
 }
 
-export function VoiceRecorder({ onSend }: VoiceRecorderProps) {
+const MIME_TYPES = [
+  "audio/mp4",
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/ogg;codecs=opus",
+];
+
+function supportedMimeType() {
+  return MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type)) || "";
+}
+
+export function VoiceRecorder({ onSend, onClose }: VoiceRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [duration, setDuration] = useState(0);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -15,13 +28,29 @@ export function VoiceRecorder({ onSend }: VoiceRecorderProps) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const discardRef = useRef(false);
+  const recordingSessionRef = useRef(0);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  const startRecording = async () => {
+  const startRecording = async (session: number) => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+        throw new Error("unsupported");
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+      });
+      if (session !== recordingSessionRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      const mimeType = supportedMimeType();
+      const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       mediaRecorderRef.current = mediaRecorder;
+      streamRef.current = stream;
       chunksRef.current = [];
+      discardRef.current = false;
 
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) {
@@ -30,9 +59,12 @@ export function VoiceRecorder({ onSend }: VoiceRecorderProps) {
       };
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-        setAudioBlob(blob);
+        const blob = new Blob(chunksRef.current, {
+          type: mediaRecorder.mimeType || mimeType || "audio/mp4",
+        });
+        if (!discardRef.current && blob.size > 0) setAudioBlob(blob);
         stream.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
       };
 
       mediaRecorder.start();
@@ -44,6 +76,8 @@ export function VoiceRecorder({ onSend }: VoiceRecorderProps) {
       }, 1000);
     } catch (error) {
       console.error("Error accessing microphone:", error);
+      toast.error("Não foi possível usar o microfone. Verifica a permissão.");
+      onClose();
     }
   };
 
@@ -58,9 +92,11 @@ export function VoiceRecorder({ onSend }: VoiceRecorderProps) {
   };
 
   const cancelRecording = () => {
+    discardRef.current = true;
     stopRecording();
     setAudioBlob(null);
     setDuration(0);
+    onClose();
   };
 
   const formatDuration = (seconds: number) => {
@@ -73,10 +109,12 @@ export function VoiceRecorder({ onSend }: VoiceRecorderProps) {
     if (!audioBlob) return;
     setIsSending(true);
     try {
-      const file = new File([audioBlob], "voice-message.webm", { type: "audio/webm" });
+      const extension = audioBlob.type.includes("mp4") ? "m4a" : audioBlob.type.includes("ogg") ? "ogg" : "webm";
+      const file = new File([audioBlob], `voice-message.${extension}`, { type: audioBlob.type });
       await onSend(file);
       setAudioBlob(null);
       setDuration(0);
+      onClose();
     } catch (error) {
       console.error("Error sending voice message:", error);
     } finally {
@@ -85,69 +123,83 @@ export function VoiceRecorder({ onSend }: VoiceRecorderProps) {
   };
 
   useEffect(() => {
-    // Auto-start recording when component mounts
-    startRecording();
+    const session = ++recordingSessionRef.current;
+    void startRecording(session);
     
     return () => {
+      recordingSessionRef.current += 1;
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
-      if (mediaRecorderRef.current && isRecording) {
+      if (mediaRecorderRef.current?.state === "recording") {
+        discardRef.current = true;
         mediaRecorderRef.current.stop();
       }
+      streamRef.current?.getTracks().forEach((track) => track.stop());
     };
   }, []);
+
+  useEffect(() => {
+    if (!audioBlob) {
+      const timer = window.setTimeout(() => setPreviewUrl(null), 0);
+      return () => window.clearTimeout(timer);
+    }
+    const url = URL.createObjectURL(audioBlob);
+    const timer = window.setTimeout(() => setPreviewUrl(url), 0);
+    return () => {
+      window.clearTimeout(timer);
+      URL.revokeObjectURL(url);
+    };
+  }, [audioBlob]);
 
   if (!isRecording && !audioBlob) {
     return null;
   }
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2 bg-[var(--surface-2)] rounded-full">
+    <div className="safe-bottom border-t hairline bg-[var(--surface)] px-3 pt-3">
+      <div className="mx-auto flex min-h-14 items-center gap-3 rounded-2xl bg-[var(--surface-2)] px-3">
       {isRecording ? (
         <>
           <div className="flex items-center gap-2">
             <div className="size-3 rounded-full bg-red-500 animate-pulse" />
             <span className="text-sm font-medium">{formatDuration(duration)}</span>
           </div>
-          <button
-            onClick={cancelRecording}
-            className="press grid size-8 place-items-center rounded-full bg-red-500 text-white"
-          >
-            <X size={16} />
+          <span className="flex-1 text-sm muted">A gravar mensagem de voz…</span>
+          <button onClick={cancelRecording} aria-label="Eliminar gravação" className="press grid size-10 place-items-center rounded-full text-red-500">
+            <Trash2 size={19} />
           </button>
           <button
             onClick={stopRecording}
-            className="press grid size-8 place-items-center rounded-full bg-[var(--brand)] text-white"
+            aria-label="Parar gravação"
+            className="press grid size-10 place-items-center rounded-full bg-red-500 text-white"
           >
-            <Mic size={16} />
+            <CircleStop size={19} />
           </button>
         </>
       ) : (
         <>
-          {audioBlob && (
-            <audio 
-              src={URL.createObjectURL(audioBlob)} 
-              controls 
-              className="h-8"
-            />
-          )}
+          <Play size={18} className="text-[var(--brand)]" />
+          {previewUrl && <audio src={previewUrl} controls preload="metadata" className="h-9 min-w-0 flex-1" />}
           <span className="text-sm muted">{formatDuration(duration)}</span>
           <button
             onClick={cancelRecording}
-            className="press grid size-8 place-items-center rounded-full hover:bg-[var(--surface)] transition-colors"
+            aria-label="Eliminar gravação"
+            className="press grid size-10 place-items-center rounded-full text-red-500"
           >
-            <X size={16} />
+            <Trash2 size={18} />
           </button>
           <button
             onClick={handleSend}
             disabled={isSending}
-            className="press grid size-8 place-items-center rounded-full bg-[var(--brand)] text-white disabled:opacity-50"
+            aria-label="Enviar gravação"
+            className="press grid size-10 place-items-center rounded-full bg-[var(--brand)] text-white disabled:opacity-50"
           >
             {isSending ? <LoaderCircle size={16} className="animate-spin" /> : <Send size={16} />}
           </button>
         </>
       )}
+      </div>
     </div>
   );
 }
