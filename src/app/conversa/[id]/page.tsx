@@ -499,17 +499,17 @@ export default function Chat() {
                       )
                     : null;
                 return (
-                  <div key={m.id}>
+                  <div key={m.id} className="animate-in fade-in slide-in-from-bottom-2 duration-300">
                     {day !== prev && (
                       <div className="my-4 text-center text-[11px] font-semibold uppercase tracking-wider muted">
                         {day}
                       </div>
                     )}
                     <div
-                      className={`group flex ${own ? "justify-end" : "justify-start"} message-enter`}
+                      className={`group flex ${own ? "justify-end" : "justify-start"}`}
                     >
                       <div
-                        className={`max-w-[85%] rounded-[24px] px-4 py-3 shadow-sm relative ${own ? "rounded-br-sm bg-gradient-to-br from-[var(--brand)] to-[var(--brand)]/90 text-white" : "rounded-bl-sm bg-[var(--surface)] border border-[var(--line)]"}`}
+                        className={`max-w-[85%] rounded-[24px] px-4 py-3 shadow-sm relative transition-all duration-200 hover:shadow-md ${own ? "rounded-br-sm bg-gradient-to-br from-[var(--brand)] to-[var(--brand)]/90 text-white" : "rounded-bl-sm bg-[var(--surface)] border border-[var(--line)]"}`}
                         onDoubleClick={() => handleDoubleTap(m)}
                       >
                         {m.reply_to_message_id && (
@@ -751,7 +751,7 @@ export default function Chat() {
                 setLightbox(null);
                 setLightboxMessage(null);
               }}
-              className="absolute right-4 top-[max(18px,env(safe-area-inset-top))] grid size-11 place-items-center rounded-full bg-black/40 backdrop-blur-md text-white press"
+              className="absolute right-4 top-[max(18px,env(safe-area-inset-top))] z-10 grid size-11 place-items-center rounded-full bg-black/40 backdrop-blur-md text-white press"
             >
               <X size={24} />
             </button>
@@ -762,7 +762,7 @@ export default function Chat() {
                 className="max-h-[85dvh] max-w-full object-contain animate-in zoom-in-95 duration-200"
               />
             </div>
-            <div className="absolute bottom-[max(24px,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 flex gap-4">
+            <div className="absolute bottom-[max(24px,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 flex gap-4 z-10">
               {lightboxMessage?.view_once && (
                 <button
                   onClick={() => {

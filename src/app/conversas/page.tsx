@@ -14,6 +14,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingList } from "@/components/ui/loading";
 import { StoriesBar } from "@/components/stories/stories-bar";
 import { StoryViewer } from "@/components/stories/story-viewer";
+import { StoryCreator } from "@/components/stories/story-creator";
 import { useSession } from "@/hooks/use-session";
 import type { ConversationPreview } from "@/lib/database.types";
 import type { Story } from "@/lib/database.types";
@@ -26,7 +27,8 @@ export default function Conversas() {
     [now, setNow] = useState(0),
     [stories, setStories] = useState<Story[]>([]),
     [viewingStory, setViewingStory] = useState<Story | null>(null),
-    [storyIndex, setStoryIndex] = useState(0);
+    [storyIndex, setStoryIndex] = useState(0),
+    [showStoryCreator, setShowStoryCreator] = useState(false);
   const load = useCallback(async () => {
     if (!user) return;
     const { data, error } = await supabase.rpc("get_my_conversations");
@@ -109,10 +111,7 @@ export default function Conversas() {
           setStoryIndex(index >= 0 ? index : 0);
           setViewingStory(story);
         }}
-        onCreateStory={() => {
-          // TODO: Implement story creation
-          console.log("Create story");
-        }}
+        onCreateStory={() => setShowStoryCreator(true)}
       />
       <section className="px-3 pt-2">
         {loading ? (
@@ -192,6 +191,12 @@ export default function Conversas() {
           stories={stories}
           initialIndex={storyIndex}
           onClose={() => setViewingStory(null)}
+        />
+      )}
+      {showStoryCreator && (
+        <StoryCreator
+          onClose={() => setShowStoryCreator(false)}
+          onSuccess={load}
         />
       )}
     </AppShell>

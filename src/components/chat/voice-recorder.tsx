@@ -85,6 +85,9 @@ export function VoiceRecorder({ onSend }: VoiceRecorderProps) {
   };
 
   useEffect(() => {
+    // Auto-start recording when component mounts
+    startRecording();
+    
     return () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
@@ -93,7 +96,7 @@ export function VoiceRecorder({ onSend }: VoiceRecorderProps) {
         mediaRecorderRef.current.stop();
       }
     };
-  }, [isRecording]);
+  }, []);
 
   if (!isRecording && !audioBlob) {
     return null;
