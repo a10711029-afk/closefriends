@@ -14,6 +14,10 @@ function urlBase64ToUint8Array(value: string) {
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
   const { user, supabase } = useSession();
   const prompted = useRef(false);
+<<<<<<< HEAD
+  const pushReady = useRef(false);
+=======
+>>>>>>> a7427ac59fd52b756eb16471061647561cd4b01c
 
   const subscribe = useCallback(async () => {
     const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
@@ -38,6 +42,10 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       auth_key: json.keys.auth,
     }, { onConflict: "endpoint" });
     if (error) throw error;
+<<<<<<< HEAD
+    pushReady.current = true;
+=======
+>>>>>>> a7427ac59fd52b756eb16471061647561cd4b01c
     return true;
   }, [supabase, user]);
 
@@ -73,6 +81,46 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
     return () => window.clearTimeout(timer);
   }, [subscribe, user]);
+<<<<<<< HEAD
+
+  useEffect(() => {
+    if (!user || !("Notification" in window) || Notification.permission !== "granted") return;
+
+    const channel = supabase
+      .channel(`local-notifications:${user.id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        async ({ new: row }) => {
+          const message = row as { sender_id?: string; conversation_id?: string; message_type?: string; message_text?: string | null };
+          if (!message.sender_id || message.sender_id === user.id || pushReady.current) return;
+          if (document.visibilityState === "visible" && window.location.pathname === `/conversa/${message.conversation_id}`) return;
+
+          const [{ data: sender }, registration] = await Promise.all([
+            supabase.from("profiles").select("display_name").eq("id", message.sender_id).single(),
+            navigator.serviceWorker.ready,
+          ]);
+          const body = message.message_type === "image"
+            ? "Enviou uma fotografia"
+            : message.message_type === "voice"
+              ? "Enviou uma mensagem de voz"
+              : message.message_type === "location"
+                ? "Partilhou uma localização"
+                : message.message_text || "Nova mensagem";
+          await registration.showNotification(sender?.display_name || "CloseChat", {
+            body,
+            icon: "/icons/icon-192.png",
+            badge: "/icons/icon-192.png",
+            data: { url: `/conversa/${message.conversation_id}` },
+          });
+        },
+      )
+      .subscribe();
+
+    return () => { void supabase.removeChannel(channel); };
+  }, [supabase, user]);
+=======
+>>>>>>> a7427ac59fd52b756eb16471061647561cd4b01c
 
   return <>{children}</>;
 }

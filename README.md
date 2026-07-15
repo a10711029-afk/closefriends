@@ -56,7 +56,11 @@ VAPID_SUBJECT=mailto:teu-email@dominio.pt
 SUPABASE_SERVICE_ROLE_KEY=service_role_do_supabase
 ```
 
+<<<<<<< HEAD
+Gera as chaves com `npm run vapid:generate` e copia o resultado para as variáveis de ambiente locais e da Vercel. A chave privada e a `service_role` são usadas apenas no servidor; nunca lhes adiciones o prefixo `NEXT_PUBLIC_`.
+=======
 Gera um par de chaves VAPID P-256 compatível com Web Push. A chave privada e a `service_role` são usadas apenas no servidor; nunca lhes adiciones o prefixo `NEXT_PUBLIC_`.
+>>>>>>> a7427ac59fd52b756eb16471061647561cd4b01c
 
 ## Comandos
 
