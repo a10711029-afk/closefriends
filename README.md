@@ -1,6 +1,6 @@
 # CloseChat
 
-PWA mobile-first para conversas privadas entre amigos, construída com Next.js 16, TypeScript, Tailwind CSS e Supabase. Não inclui feed, grupos, stories ou perfis públicos.
+PWA mobile-first para conversas privadas entre amigos, construída com Next.js 15, TypeScript, Tailwind CSS e Supabase. Inclui mensagens, fotografias, áudio, localização e stories privados.
 
 ## Funcionalidades
 
@@ -17,7 +17,7 @@ PWA mobile-first para conversas privadas entre amigos, construída com Next.js 1
 ## Configuração local
 
 1. Cria um projeto em [Supabase](https://supabase.com).
-2. No SQL Editor, executa integralmente `supabase/migrations/001_closechat.sql` num projeto novo.
+2. No SQL Editor, abre `supabase/closechat_complete.sql` e executa o ficheiro inteiro, de uma só vez, num projeto novo. Não é necessário executar as migrations individualmente.
 3. Em Authentication → URL Configuration, define o Site URL e adiciona `http://localhost:3000/auth/callback` aos Redirect URLs.
 4. Copia `.env.example` para `.env.local` e preenche a URL e a chave `anon`/publishable. Nunca uses a `service_role` no frontend.
 5. Instala e inicia:
@@ -31,7 +31,9 @@ Abre `http://localhost:3000`. Para testar Realtime e amizade, usa dois utilizado
 
 ## Supabase e segurança
 
-O SQL cria tabelas, índices, constraints, triggers, RPCs, RLS, publicação Realtime e os buckets `avatars` e `chat-images`. `chat-images` é privado; a app grava apenas o caminho e pede URLs assinadas de uma hora. A autorização definitiva está nas policies/RPCs, não na interface.
+O SQL cria tabelas, índices, constraints, triggers, RPCs, RLS, publicação Realtime e os buckets `avatars`, `chat-images`, `chat-voice` e `stories`. Os ficheiros privados usam URLs assinadas. A autorização definitiva está nas policies/RPCs, não na interface.
+
+Se a base de dados já foi criada com a versão inicial da app, não executes novamente o ficheiro completo. Executa apenas `supabase/upgrade_all_features.sql`, também inteiro e numa única operação. Este atualizador reúne áudio, localização, stories, buckets e respetivas políticas.
 
 Se a migration for repetida num projeto que já contém policies/tipos com os mesmos nomes, recria o projeto ou remove primeiro os objetos anteriores. A migration foi concebida como instalação inicial.
 
@@ -45,7 +47,16 @@ Se a migration for repetida num projeto que já contém policies/tipos com os me
 
 ## Notificações push
 
-O service worker aceita eventos `push`, respeita o campo `preview` e abre a rota indicada. A tabela `push_subscriptions` guarda endpoints com RLS. Para ativar o envio em produção, cria uma Supabase Edge Function ou serviço backend com as chaves VAPID em secrets do servidor e dispara-o por Database Webhook. Não coloques chaves privadas VAPID nem `service_role` em variáveis `NEXT_PUBLIC_*`.
+O service worker recebe eventos `push`, e a rota autenticada `/api/notifications/message` envia a notificação aos restantes membros da conversa. Configura estas variáveis no ambiente local e na Vercel:
+
+```env
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=chave_publica_vapid
+VAPID_PRIVATE_KEY=chave_privada_vapid
+VAPID_SUBJECT=mailto:teu-email@dominio.pt
+SUPABASE_SERVICE_ROLE_KEY=service_role_do_supabase
+```
+
+Gera um par de chaves VAPID P-256 compatível com Web Push. A chave privada e a `service_role` são usadas apenas no servidor; nunca lhes adiciones o prefixo `NEXT_PUBLIC_`.
 
 ## Comandos
 

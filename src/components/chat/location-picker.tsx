@@ -48,19 +48,23 @@ export function LocationPicker({ onSend, onClose }: LocationPickerProps) {
         setLoading(false);
       },
       (err) => {
-        setError("Não foi possível obter a localização. Verifica as permissões.");
+        const message = err.code === err.PERMISSION_DENIED
+          ? "A localização está bloqueada. Ativa a permissão nas definições do Safari."
+          : "Não foi possível obter a localização. Tenta novamente num local com melhor sinal.";
+        setError(message);
         setLoading(false);
       },
       {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0,
+        enableHighAccuracy: false,
+        timeout: 15000,
+        maximumAge: 30000,
       }
     );
   };
 
   useEffect(() => {
-    getCurrentLocation();
+    const timer = window.setTimeout(getCurrentLocation, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   if (loading) {
@@ -77,7 +81,7 @@ export function LocationPicker({ onSend, onClose }: LocationPickerProps) {
   if (error) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm">
-        <div className="mx-auto w-full max-w-[340px] rounded-[28px] bg-[var(--surface)] p-6 shadow-2xl">
+        <div className="relative mx-auto w-[calc(100%-24px)] max-w-[360px] rounded-[28px] bg-[var(--surface)] p-6 shadow-2xl">
           <div className="text-center">
             <MapPin size={40} className="mx-auto text-red-500 mb-4" />
             <h3 className="text-lg font-bold mb-2">Erro</h3>
@@ -104,7 +108,7 @@ export function LocationPicker({ onSend, onClose }: LocationPickerProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm">
-      <div className="mx-auto w-full max-w-[340px] rounded-[28px] bg-[var(--surface)] p-6 shadow-2xl">
+      <div className="relative mx-auto w-[calc(100%-24px)] max-w-[360px] rounded-[28px] bg-[var(--surface)] p-6 shadow-2xl">
         <button
           onClick={onClose}
           className="absolute right-4 top-4 grid size-8 place-items-center rounded-full bg-[var(--surface-2)] press"
