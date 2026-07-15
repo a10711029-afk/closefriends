@@ -11,6 +11,10 @@ create table if not exists public.stories (
 );
 alter table public.messages add column if not exists viewed_at timestamptz;
 alter table public.messages add column if not exists viewed_by uuid references public.profiles(id) on delete set null;
+alter table public.conversation_members add column if not exists is_pinned boolean not null default false;
+alter table public.conversation_members add column if not exists is_archived boolean not null default false;
+alter table public.conversation_members add column if not exists muted_until timestamptz;
+create index if not exists conversation_members_preferences_idx on public.conversation_members(user_id,is_archived,is_pinned);
 create index if not exists stories_active_idx on public.stories(expires_at desc, created_at desc);
 create index if not exists stories_user_idx on public.stories(user_id, created_at desc);
 alter table public.stories enable row level security;

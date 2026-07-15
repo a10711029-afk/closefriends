@@ -32,10 +32,12 @@ export async function POST(request: Request) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const [{ data: members }, { data: sender }] = await Promise.all([
-    admin.from("conversation_members").select("user_id").eq("conversation_id", message.conversation_id).neq("user_id", user.id),
+    admin.from("conversation_members").select("user_id, muted_until").eq("conversation_id", message.conversation_id).neq("user_id", user.id),
     admin.from("profiles").select("display_name").eq("id", user.id).single(),
   ]);
-  const recipientIds = (members || []).map((member) => member.user_id);
+  const recipientIds = (members || [])
+    .filter((member) => !member.muted_until || new Date(member.muted_until).getTime() <= Date.now())
+    .map((member) => member.user_id);
   if (!recipientIds.length) return NextResponse.json({ sent: 0 });
 
   const { data: subscriptions } = await admin

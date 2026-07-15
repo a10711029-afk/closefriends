@@ -46,11 +46,20 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   useEffect(() => {
     if (!user || !("Notification" in window)) return;
 
+    const subscribeAfterPermission = () => {
+      if (Notification.permission === "granted") {
+        void subscribe().catch((error) => console.error("Push subscription failed:", error));
+      }
+    };
+    window.addEventListener("closechat:notifications-enabled", subscribeAfterPermission);
+
     if (Notification.permission === "granted") {
       void subscribe().catch((error) => console.error("Push subscription failed:", error));
-      return;
+      return () => window.removeEventListener("closechat:notifications-enabled", subscribeAfterPermission);
     }
-    if (Notification.permission !== "default" || prompted.current) return;
+    if (Notification.permission !== "default" || prompted.current) {
+      return () => window.removeEventListener("closechat:notifications-enabled", subscribeAfterPermission);
+    }
 
     prompted.current = true;
     const timer = window.setTimeout(() => {
@@ -73,7 +82,10 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       });
     }, 2500);
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("closechat:notifications-enabled", subscribeAfterPermission);
+    };
   }, [subscribe, user]);
 
   useEffect(() => {

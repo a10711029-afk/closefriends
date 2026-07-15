@@ -1,8 +1,9 @@
 -- CloseChat: atualização completa para uma base de dados existente.
 -- Executar este ficheiro inteiro, uma única vez, no SQL Editor do Supabase.
 
--- Os COMMITs tornam os novos valores do enum utilizáveis no restante script,
--- mesmo quando todo o conteúdo é enviado ao SQL Editor de uma só vez.
+-- Os COMMITs tornam os novos valores do enum utilizáveis no restante script
+-- e libertam os bloqueios entre blocos. O ficheiro continua a ser executado
+-- inteiro de uma só vez, mas evita deadlocks com a aplicação e o Realtime.
 alter type public.message_kind add value if not exists 'voice';
 commit;
 alter type public.message_kind add value if not exists 'location';
@@ -16,10 +17,55 @@ alter table public.messages add column if not exists location_lat numeric;
 alter table public.messages add column if not exists location_lng numeric;
 alter table public.messages add column if not exists location_address text;
 alter table public.messages add column if not exists viewed_at timestamptz;
-alter table public.messages add column if not exists viewed_by uuid references public.profiles(id) on delete set null;
-
+alter table public.messages add column if not exists viewed_by uuid;
 create index if not exists messages_read_at_idx on public.messages(read_at);
 create index if not exists messages_reaction_idx on public.messages(reaction);
+commit;
+
+-- A chave externa fica num bloco curto e independente para não manter
+-- messages bloqueada enquanto tenta obter um bloqueio em profiles.
+do $$
+declare viewed_by_attnum smallint;
+begin
+  select attnum into viewed_by_attnum
+  from pg_attribute
+  where attrelid='public.messages'::regclass and attname='viewed_by' and not attisdropped;
+
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid='public.messages'::regclass
+      and contype='f'
+      and viewed_by_attnum=any(conkey)
+  ) then
+    alter table public.messages
+      add constraint messages_viewed_by_fkey
+      foreign key(viewed_by) references public.profiles(id) on delete set null not valid;
+  end if;
+end $$;
+commit;
+
+do $$
+declare fk_name text;
+begin
+  select c.conname into fk_name
+  from pg_constraint c
+  join pg_attribute a
+    on a.attrelid=c.conrelid and a.attnum=any(c.conkey)
+  where c.conrelid='public.messages'::regclass
+    and c.contype='f' and a.attname='viewed_by' and not c.convalidated
+  limit 1;
+
+  if fk_name is not null then
+    execute format('alter table public.messages validate constraint %I',fk_name);
+  end if;
+end $$;
+commit;
+
+alter table public.conversation_members add column if not exists is_pinned boolean not null default false;
+alter table public.conversation_members add column if not exists is_archived boolean not null default false;
+alter table public.conversation_members add column if not exists muted_until timestamptz;
+create index if not exists conversation_members_preferences_idx on public.conversation_members(user_id,is_archived,is_pinned);
+commit;
 
 create table if not exists public.stories (
   id uuid primary key default gen_random_uuid(),
@@ -42,6 +88,7 @@ create policy "stories create own" on public.stories for insert to authenticated
   with check (user_id = auth.uid() and expires_at <= now() + interval '24 hours 5 minutes');
 create policy "stories delete own" on public.stories for delete to authenticated
   using (user_id = auth.uid());
+commit;
 
 insert into storage.buckets(id, name, public, file_size_limit, allowed_mime_types)
 values
@@ -79,6 +126,7 @@ create policy "stories visible to friends" on storage.objects for select to auth
   );
 create policy "story owner delete" on storage.objects for delete to authenticated
   using (bucket_id = 'stories' and (storage.foldername(name))[1] = auth.uid()::text);
+commit;
 
 -- Remove todas as constraints antigas ligadas ao tipo de mensagem, incluindo
 -- a constraint sem nome explícito criada pela primeira versão da aplicação.
@@ -102,7 +150,13 @@ alter table public.messages add constraint messages_message_type_check check (
   or (message_type = 'image' and image_url is not null and voice_url is null and location_lat is null and location_lng is null)
   or (message_type = 'voice' and voice_url is not null and image_url is null and location_lat is null and location_lng is null)
   or (message_type = 'location' and location_lat is not null and location_lng is not null and image_url is null and voice_url is null)
-);
+) not valid;
+commit;
+
+-- A validação usa um bloqueio mais leve do que criar e validar a constraint
+-- na mesma operação, o que permite manter a app online durante a atualização.
+alter table public.messages validate constraint messages_message_type_check;
+commit;
 
 create or replace function public.send_voice_message(
   p_message_id uuid,
@@ -166,8 +220,10 @@ end $$;
 
 revoke all on function public.send_voice_message(uuid,uuid,text,uuid),public.send_location_message(uuid,uuid,numeric,numeric,text,uuid),public.open_view_once_message(uuid) from public;
 grant execute on function public.send_voice_message(uuid,uuid,text,uuid),public.send_location_message(uuid,uuid,numeric,numeric,text,uuid),public.open_view_once_message(uuid) to authenticated;
+commit;
 
 do $$ begin
   alter publication supabase_realtime add table public.stories;
 exception when duplicate_object then null;
 end $$;
+commit;

@@ -33,9 +33,12 @@ create table public.conversations (
 );
 create table public.conversation_members (
   conversation_id uuid not null references public.conversations(id) on delete cascade, user_id uuid not null references public.profiles(id) on delete cascade,
-  joined_at timestamptz not null default now(), last_read_at timestamptz not null default now(), primary key(conversation_id,user_id)
+  joined_at timestamptz not null default now(), last_read_at timestamptz not null default now(),
+  is_pinned boolean not null default false, is_archived boolean not null default false, muted_until timestamptz,
+  primary key(conversation_id,user_id)
 );
 create index conversation_members_user_idx on public.conversation_members(user_id);
+create index conversation_members_preferences_idx on public.conversation_members(user_id,is_archived,is_pinned);
 create table public.messages (
   id uuid primary key default gen_random_uuid(), conversation_id uuid not null references public.conversations(id) on delete cascade,
   sender_id uuid not null references public.profiles(id) on delete cascade, message_type public.message_kind not null,

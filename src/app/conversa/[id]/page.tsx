@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { useParams } from "next/navigation";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { toast } from "sonner";
 import { AuthGate } from "@/components/auth/auth-gate";
 import { Avatar } from "@/components/ui/avatar";
@@ -36,6 +37,7 @@ export default function Chat() {
     [loading, setLoading] = useState(true),
     [sending, setSending] = useState(false),
     [typing, setTyping] = useState(false),
+    [friendRecording, setFriendRecording] = useState(false),
     [reply, setReply] = useState<Message | null>(null),
     [lightbox, setLightbox] = useState<string | null>(null),
     [lightboxMessage, setLightboxMessage] = useState<Message | null>(null),
@@ -47,6 +49,7 @@ export default function Chat() {
     [searchQuery, setSearchQuery] = useState(""),
     [showSearch, setShowSearch] = useState(false),
     [isRecording, setIsRecording] = useState(false),
+    [recordingGesture, setRecordingGesture] = useState<{ x: number; y: number } | null>(null),
     [showLocationPicker, setShowLocationPicker] = useState(false),
     [isNearBottom, setIsNearBottom] = useState(true),
     [hasNewMessages, setHasNewMessages] = useState(false);
@@ -54,7 +57,10 @@ export default function Chat() {
     scrollArea = useRef<HTMLElement>(null),
     initialScrollDone = useRef(false),
     previousMessageCount = useRef(0),
-    typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null),
+    recordingTimer = useRef<ReturnType<typeof setTimeout> | null>(null),
+    chatChannel = useRef<RealtimeChannel | null>(null),
+    swipeStart = useRef<{ x: number; y: number; id: string } | null>(null);
 
   const scrollToLatest = useCallback((behavior: ScrollBehavior = "smooth") => {
     const area = scrollArea.current;
@@ -192,10 +198,23 @@ export default function Chat() {
           typingTimer.current = setTimeout(() => setTyping(false), 1800);
         }
       })
+      .on("broadcast", { event: "recording" }, ({ payload }) => {
+        if (payload.user_id !== user.id) {
+          setFriendRecording(!!payload.recording);
+          if (recordingTimer.current) clearTimeout(recordingTimer.current);
+          if (payload.recording) {
+            recordingTimer.current = setTimeout(() => setFriendRecording(false), 5000);
+          }
+        }
+      })
       .subscribe();
+    chatChannel.current = channel;
     return () => {
       clearTimeout(initialLoad);
       clearInterval(clock);
+      if (typingTimer.current) clearTimeout(typingTimer.current);
+      if (recordingTimer.current) clearTimeout(recordingTimer.current);
+      chatChannel.current = null;
       void supabase.removeChannel(channel);
     };
   }, [load, user, supabase, id, hydrateImages]);
@@ -367,13 +386,35 @@ export default function Chat() {
   }
   function announceTyping(value: string) {
     setText(value);
-    supabase
-      .channel(`chat:${id}`)
-      .send({
+    void chatChannel.current?.send({
         type: "broadcast",
         event: "typing",
         payload: { user_id: user?.id, typing: !!value },
       });
+  }
+  function announceRecording(recording: boolean) {
+    void chatChannel.current?.send({
+      type: "broadcast",
+      event: "recording",
+      payload: { user_id: user?.id, recording },
+    });
+  }
+  function closeRecorder() {
+    setIsRecording(false);
+    setRecordingGesture(null);
+    announceRecording(false);
+  }
+  function finishSwipe(event: React.TouchEvent, message: Message) {
+    const start = swipeStart.current;
+    const touch = event.changedTouches[0];
+    swipeStart.current = null;
+    if (!start || start.id !== message.id || !touch) return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dx) >= 58 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+      setReply(message);
+      navigator.vibrate?.(20);
+    }
   }
   async function remove(m: Message, deleteForBoth: boolean = false) {
     if (deleteForBoth) {
@@ -502,7 +543,12 @@ export default function Chat() {
                   {friend?.display_name || "Conversa"}
                 </h1>
                 <p className="text-xs muted flex items-center gap-1">
-                  {typing ? (
+                  {friendRecording ? (
+                    <>
+                      <Mic size={12} className="text-[var(--brand)]" />
+                      <span className="font-semibold text-[var(--brand)]">a gravar áudio…</span>
+                    </>
+                  ) : typing ? (
                     <>
                       <span className="flex gap-0.5">
                         <span className="typing-dot size-1 rounded-full bg-[var(--brand)]" />
@@ -585,6 +631,11 @@ export default function Chat() {
                     )}
                     <div
                       className={`group flex ${own ? "justify-end" : "justify-start"}`}
+                      onTouchStart={(event) => {
+                        const touch = event.touches[0];
+                        if (touch) swipeStart.current = { x: touch.clientX, y: touch.clientY, id: m.id };
+                      }}
+                      onTouchEnd={(event) => finishSwipe(event, m)}
                     >
                       <div
                         className={`max-w-[85%] rounded-[24px] px-4 py-3 shadow-sm relative transition-all duration-200 hover:shadow-md ${own ? "rounded-br-sm bg-gradient-to-br from-[var(--brand)] to-[var(--brand)]/90 text-white" : "rounded-bl-sm bg-[var(--surface)] border border-[var(--line)]"}`}
@@ -800,13 +851,30 @@ export default function Chat() {
               {sending ? <LoaderCircle size={19} className="animate-spin" /> : <Send size={19} />}
             </button>
           ) : (
-            <button onClick={() => setIsRecording(true)} aria-label="Gravar voz" className="press grid size-11 shrink-0 place-items-center rounded-full bg-[var(--surface-2)] text-[var(--brand)]">
+            <button
+              onPointerDown={(event) => {
+                event.preventDefault();
+                setRecordingGesture({ x: event.clientX, y: event.clientY });
+                setIsRecording(true);
+                announceRecording(true);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setRecordingGesture(null);
+                  setIsRecording(true);
+                  announceRecording(true);
+                }
+              }}
+              aria-label="Manter premido para gravar voz"
+              className="press grid size-11 shrink-0 touch-none place-items-center rounded-full bg-[var(--surface-2)] text-[var(--brand)]"
+            >
               <Mic size={20} />
             </button>
           )}
         </footer>
         {isRecording && (
-          <VoiceRecorder onSend={sendVoice} onClose={() => setIsRecording(false)} />
+          <VoiceRecorder onSend={sendVoice} onClose={closeRecorder} gestureStart={recordingGesture} />
         )}
         {showLocationPicker && (
           <LocationPicker

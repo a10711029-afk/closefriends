@@ -1,11 +1,12 @@
 "use client";
 import { useRef, useState, useEffect } from "react";
-import { CircleStop, Play, Send, Trash2, LoaderCircle } from "lucide-react";
+import { ChevronLeft, CircleStop, Lock, Play, Send, Trash2, LoaderCircle } from "lucide-react";
 import { toast } from "sonner";
 
 interface VoiceRecorderProps {
   onSend: (audioFile: File) => Promise<void>;
   onClose: () => void;
+  gestureStart?: { x: number; y: number } | null;
 }
 
 const MIME_TYPES = [
@@ -19,11 +20,13 @@ function supportedMimeType() {
   return MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type)) || "";
 }
 
-export function VoiceRecorder({ onSend, onClose }: VoiceRecorderProps) {
+export function VoiceRecorder({ onSend, onClose, gestureStart }: VoiceRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [duration, setDuration] = useState(0);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [gesture, setGesture] = useState<"cancel" | "lock" | null>(null);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -31,6 +34,9 @@ export function VoiceRecorder({ onSend, onClose }: VoiceRecorderProps) {
   const streamRef = useRef<MediaStream | null>(null);
   const discardRef = useRef(false);
   const recordingSessionRef = useRef(0);
+  const lockedRef = useRef(false);
+  const gestureRef = useRef<"cancel" | "lock" | null>(null);
+  const pendingStopRef = useRef(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const startRecording = async (session: number) => {
@@ -71,6 +77,14 @@ export function VoiceRecorder({ onSend, onClose }: VoiceRecorderProps) {
       setIsRecording(true);
       setDuration(0);
 
+      if (pendingStopRef.current) {
+        pendingStopRef.current = false;
+        window.setTimeout(() => {
+          if (mediaRecorder.state === "recording") mediaRecorder.stop();
+          setIsRecording(false);
+        }, 0);
+      }
+
       timerRef.current = setInterval(() => {
         setDuration(prev => prev + 1);
       }, 1000);
@@ -82,13 +96,13 @@ export function VoiceRecorder({ onSend, onClose }: VoiceRecorderProps) {
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    if (mediaRecorderRef.current?.state === "recording") {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
-    }
+    } else pendingStopRef.current = true;
   };
 
   const cancelRecording = () => {
@@ -140,6 +154,35 @@ export function VoiceRecorder({ onSend, onClose }: VoiceRecorderProps) {
   }, []);
 
   useEffect(() => {
+    if (!gestureStart) return;
+    const move = (event: PointerEvent) => {
+      const dx = event.clientX - gestureStart.x;
+      const dy = event.clientY - gestureStart.y;
+      const next = dx < -72 ? "cancel" : dy < -64 ? "lock" : null;
+      gestureRef.current = next;
+      setGesture(next);
+      if (next === "lock") {
+        lockedRef.current = true;
+        setLocked(true);
+      }
+    };
+    const release = () => {
+      if (gestureRef.current === "cancel") cancelRecording();
+      else if (!lockedRef.current) stopRecording();
+      setGesture(null);
+      gestureRef.current = null;
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", release, { once: true });
+    window.addEventListener("pointercancel", release, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+    };
+  }, [gestureStart]);
+
+  useEffect(() => {
     if (!audioBlob) {
       const timer = window.setTimeout(() => setPreviewUrl(null), 0);
       return () => window.clearTimeout(timer);
@@ -165,7 +208,17 @@ export function VoiceRecorder({ onSend, onClose }: VoiceRecorderProps) {
             <div className="size-3 rounded-full bg-red-500 animate-pulse" />
             <span className="text-sm font-medium">{formatDuration(duration)}</span>
           </div>
-          <span className="flex-1 text-sm muted">A gravar mensagem de voz…</span>
+          <div className="flex flex-1 items-center justify-center gap-2 text-xs font-medium muted">
+            {locked ? (
+              <><Lock size={14} className="text-[var(--brand)]" /> Gravação bloqueada</>
+            ) : gesture === "cancel" ? (
+              <span className="font-semibold text-red-500">Solta para cancelar</span>
+            ) : gesture === "lock" ? (
+              <span className="font-semibold text-[var(--brand)]">Solta para bloquear</span>
+            ) : (
+              <><ChevronLeft size={16} /> Desliza para cancelar · sobe para bloquear</>
+            )}
+          </div>
           <button onClick={cancelRecording} aria-label="Eliminar gravação" className="press grid size-10 place-items-center rounded-full text-red-500">
             <Trash2 size={19} />
           </button>
