@@ -41,7 +41,7 @@ create table public.messages (
   sender_id uuid not null references public.profiles(id) on delete cascade, message_type public.message_kind not null,
   message_text text check(char_length(message_text)<=5000), image_url text, image_caption text check(char_length(image_caption)<=500),
   voice_url text, location_lat numeric, location_lng numeric, location_address text,
-  view_once boolean default null, read_at timestamptz default null, reaction text,
+  view_once boolean default null, viewed_at timestamptz, viewed_by uuid references public.profiles(id) on delete set null, read_at timestamptz default null, reaction text,
   reply_to_message_id uuid references public.messages(id) on delete set null, created_at timestamptz not null default now(), updated_at timestamptz not null default now(), deleted_at timestamptz,
   check (
     deleted_at is not null
@@ -181,7 +181,7 @@ create policy "stories delete own" on public.stories for delete to authenticated
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types) values
 ('avatars','avatars',true,2097152,array['image/webp','image/jpeg','image/png']),
 ('chat-images','chat-images',false,5242880,array['image/webp','image/jpeg','image/png']),
-('chat-voice','chat-voice',false,10485760,array['audio/webm','audio/mp4','audio/ogg']),
+('chat-voice','chat-voice',false,10485760,null::text[]),
 ('stories','stories',false,5242880,array['image/webp','image/jpeg','image/png'])
 on conflict(id) do update set public=excluded.public,file_size_limit=excluded.file_size_limit,allowed_mime_types=excluded.allowed_mime_types;
 create policy "avatar public read" on storage.objects for select using(bucket_id='avatars');
@@ -197,5 +197,14 @@ create policy "voice owner delete" on storage.objects for delete to authenticate
 create policy "story owner upload" on storage.objects for insert to authenticated with check(bucket_id='stories' and (storage.foldername(name))[1]=auth.uid()::text);
 create policy "stories visible to friends" on storage.objects for select to authenticated using(bucket_id='stories' and (((storage.foldername(name))[1])::uuid=auth.uid() or public.are_friends(auth.uid(),((storage.foldername(name))[1])::uuid)));
 create policy "story owner delete" on storage.objects for delete to authenticated using(bucket_id='stories' and (storage.foldername(name))[1]=auth.uid()::text);
+
+create or replace function public.send_voice_message(p_message_id uuid,p_conversation_id uuid,p_voice_url text,p_reply_to_message_id uuid default null) returns uuid language plpgsql security definer set search_path=public as $$
+declare me uuid:=auth.uid();begin if me is null or not public.is_conversation_member(p_conversation_id,me) then raise exception 'Sem acesso a esta conversa';end if;if not exists(select 1 from conversation_members peer where peer.conversation_id=p_conversation_id and peer.user_id<>me and public.are_friends(me,peer.user_id) and not public.is_blocked(me,peer.user_id)) then raise exception 'A conversa já não está disponível';end if;insert into messages(id,conversation_id,sender_id,message_type,voice_url,reply_to_message_id) values(p_message_id,p_conversation_id,me,'voice',p_voice_url,p_reply_to_message_id);return p_message_id;end $$;
+create or replace function public.send_location_message(p_message_id uuid,p_conversation_id uuid,p_lat numeric,p_lng numeric,p_address text default null,p_reply_to_message_id uuid default null) returns uuid language plpgsql security definer set search_path=public as $$
+declare me uuid:=auth.uid();begin if me is null or not public.is_conversation_member(p_conversation_id,me) then raise exception 'Sem acesso a esta conversa';end if;if not exists(select 1 from conversation_members peer where peer.conversation_id=p_conversation_id and peer.user_id<>me and public.are_friends(me,peer.user_id) and not public.is_blocked(me,peer.user_id)) then raise exception 'A conversa já não está disponível';end if;if p_lat not between -90 and 90 or p_lng not between -180 and 180 then raise exception 'Coordenadas inválidas';end if;insert into messages(id,conversation_id,sender_id,message_type,location_lat,location_lng,location_address,reply_to_message_id) values(p_message_id,p_conversation_id,me,'location',p_lat,p_lng,nullif(trim(p_address),''),p_reply_to_message_id);return p_message_id;end $$;
+create or replace function public.open_view_once_message(p_message_id uuid) returns boolean language plpgsql security definer set search_path=public as $$
+declare target messages;me uuid:=auth.uid();begin select * into target from messages where id=p_message_id for update;if not found or me is null or not public.is_conversation_member(target.conversation_id,me) or target.sender_id=me or target.message_type<>'image' or target.view_once is not true then raise exception 'Fotografia indisponível';end if;if target.viewed_at is not null then raise exception 'Esta fotografia já foi aberta';end if;update messages set viewed_at=now(),viewed_by=me where id=p_message_id;return true;end $$;
+revoke all on function public.send_voice_message(uuid,uuid,text,uuid),public.send_location_message(uuid,uuid,numeric,numeric,text,uuid),public.open_view_once_message(uuid) from public;
+grant execute on function public.send_voice_message(uuid,uuid,text,uuid),public.send_location_message(uuid,uuid,numeric,numeric,text,uuid),public.open_view_once_message(uuid) to authenticated;
 
 alter publication supabase_realtime add table public.messages,public.friend_requests,public.conversation_members,public.stories;

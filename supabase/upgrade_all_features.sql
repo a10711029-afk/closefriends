@@ -15,6 +15,8 @@ alter table public.messages add column if not exists voice_url text;
 alter table public.messages add column if not exists location_lat numeric;
 alter table public.messages add column if not exists location_lng numeric;
 alter table public.messages add column if not exists location_address text;
+alter table public.messages add column if not exists viewed_at timestamptz;
+alter table public.messages add column if not exists viewed_by uuid references public.profiles(id) on delete set null;
 
 create index if not exists messages_read_at_idx on public.messages(read_at);
 create index if not exists messages_reaction_idx on public.messages(reaction);
@@ -44,7 +46,7 @@ create policy "stories delete own" on public.stories for delete to authenticated
 insert into storage.buckets(id, name, public, file_size_limit, allowed_mime_types)
 values
   ('stories', 'stories', false, 5242880, array['image/webp','image/jpeg','image/png']),
-  ('chat-voice', 'chat-voice', false, 10485760, array['audio/webm','audio/mp4','audio/ogg'])
+  ('chat-voice', 'chat-voice', false, 10485760, null::text[])
 on conflict(id) do update set
   public = excluded.public,
   file_size_limit = excluded.file_size_limit,
@@ -101,6 +103,69 @@ alter table public.messages add constraint messages_message_type_check check (
   or (message_type = 'voice' and voice_url is not null and image_url is null and location_lat is null and location_lng is null)
   or (message_type = 'location' and location_lat is not null and location_lng is not null and image_url is null and voice_url is null)
 );
+
+create or replace function public.send_voice_message(
+  p_message_id uuid,
+  p_conversation_id uuid,
+  p_voice_url text,
+  p_reply_to_message_id uuid default null
+) returns uuid language plpgsql security definer set search_path=public as $$
+declare me uuid := auth.uid();
+begin
+  if me is null or not public.is_conversation_member(p_conversation_id, me) then
+    raise exception 'Sem acesso a esta conversa';
+  end if;
+  if not exists (
+    select 1 from conversation_members peer
+    where peer.conversation_id=p_conversation_id and peer.user_id<>me
+      and public.are_friends(me,peer.user_id) and not public.is_blocked(me,peer.user_id)
+  ) then raise exception 'A conversa já não está disponível'; end if;
+  insert into messages(id,conversation_id,sender_id,message_type,voice_url,reply_to_message_id)
+  values(p_message_id,p_conversation_id,me,'voice',p_voice_url,p_reply_to_message_id);
+  return p_message_id;
+end $$;
+
+create or replace function public.send_location_message(
+  p_message_id uuid,
+  p_conversation_id uuid,
+  p_lat numeric,
+  p_lng numeric,
+  p_address text default null,
+  p_reply_to_message_id uuid default null
+) returns uuid language plpgsql security definer set search_path=public as $$
+declare me uuid := auth.uid();
+begin
+  if me is null or not public.is_conversation_member(p_conversation_id, me) then
+    raise exception 'Sem acesso a esta conversa';
+  end if;
+  if p_lat not between -90 and 90 or p_lng not between -180 and 180 then
+    raise exception 'Coordenadas inválidas';
+  end if;
+  if not exists (
+    select 1 from conversation_members peer
+    where peer.conversation_id=p_conversation_id and peer.user_id<>me
+      and public.are_friends(me,peer.user_id) and not public.is_blocked(me,peer.user_id)
+  ) then raise exception 'A conversa já não está disponível'; end if;
+  insert into messages(id,conversation_id,sender_id,message_type,location_lat,location_lng,location_address,reply_to_message_id)
+  values(p_message_id,p_conversation_id,me,'location',p_lat,p_lng,nullif(trim(p_address),''),p_reply_to_message_id);
+  return p_message_id;
+end $$;
+
+create or replace function public.open_view_once_message(p_message_id uuid)
+returns boolean language plpgsql security definer set search_path=public as $$
+declare target messages; me uuid := auth.uid();
+begin
+  select * into target from messages where id=p_message_id for update;
+  if not found or me is null or not public.is_conversation_member(target.conversation_id,me) or target.sender_id=me or target.message_type<>'image' or target.view_once is not true then
+    raise exception 'Fotografia indisponível';
+  end if;
+  if target.viewed_at is not null then raise exception 'Esta fotografia já foi aberta'; end if;
+  update messages set viewed_at=now(),viewed_by=me where id=p_message_id;
+  return true;
+end $$;
+
+revoke all on function public.send_voice_message(uuid,uuid,text,uuid),public.send_location_message(uuid,uuid,numeric,numeric,text,uuid),public.open_view_once_message(uuid) from public;
+grant execute on function public.send_voice_message(uuid,uuid,text,uuid),public.send_location_message(uuid,uuid,numeric,numeric,text,uuid),public.open_view_once_message(uuid) to authenticated;
 
 do $$ begin
   alter publication supabase_realtime add table public.stories;

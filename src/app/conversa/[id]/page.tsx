@@ -54,7 +54,7 @@ export default function Chat() {
       Promise.all(
         rows.map(async (m) => {
           let signedUrl = m.signed_image_url;
-          if (m.message_type === "image" && m.image_url && !signedUrl) {
+          if (m.message_type === "image" && m.image_url && !m.view_once && !signedUrl) {
             const { data } = await supabase.storage
               .from("chat-images")
               .createSignedUrl(m.image_url, 3600);
@@ -253,26 +253,23 @@ export default function Chat() {
     const messageId = crypto.randomUUID();
     const extension = file.type.includes("mp4") ? "m4a" : file.type.includes("ogg") ? "ogg" : "webm";
     const path = `${id}/${messageId}.${extension}`;
+    const contentType = (file.type || "audio/webm").split(";")[0];
     const { error: uploadError } = await supabase.storage
       .from("chat-voice")
-      .upload(path, file, { contentType: file.type || "audio/webm", upsert: false });
+      .upload(path, file, { contentType, upsert: false });
     if (uploadError) {
-      toast.error("O upload falhou. Tenta novamente.");
+      toast.error(`Áudio não enviado: ${uploadError.message}`);
       throw uploadError;
     }
-    const { error } = await supabase
-      .from("messages")
-      .insert({
-        id: messageId,
-        conversation_id: id,
-        sender_id: user.id,
-        message_type: "voice",
-        voice_url: path,
-        reply_to_message_id: reply?.id || null,
-      });
+    const { error } = await supabase.rpc("send_voice_message", {
+      p_message_id: messageId,
+      p_conversation_id: id,
+      p_voice_url: path,
+      p_reply_to_message_id: reply?.id || null,
+    });
     if (error) {
       await supabase.storage.from("chat-voice").remove([path]);
-      toast.error("Mensagem de voz não enviada.");
+      toast.error(`Mensagem de voz não enviada: ${error.message}`);
       throw error;
     }
     notifyMessage(messageId, "Enviou uma mensagem de voz");
@@ -282,25 +279,40 @@ export default function Chat() {
   async function sendLocation(location: { lat: number; lng: number; address?: string }) {
     if (!user) return;
     const messageId = crypto.randomUUID();
-    const { error } = await supabase
-      .from("messages")
-      .insert({
-        id: messageId,
-        conversation_id: id,
-        sender_id: user.id,
-        message_type: "location",
-        location_lat: location.lat,
-        location_lng: location.lng,
-        location_address: location.address || null,
-        reply_to_message_id: reply?.id || null,
-      });
+    const { error } = await supabase.rpc("send_location_message", {
+      p_message_id: messageId,
+      p_conversation_id: id,
+      p_lat: location.lat,
+      p_lng: location.lng,
+      p_address: location.address || null,
+      p_reply_to_message_id: reply?.id || null,
+    });
     if (error) {
-      toast.error("Localização não enviada.");
+      toast.error(`Localização não enviada: ${error.message}`);
       throw error;
     }
     notifyMessage(messageId, "Partilhou uma localização");
     setReply(null);
     setShowLocationPicker(false);
+  }
+  async function openViewOnce(message: Message) {
+    if (!message.image_url || !user || message.sender_id === user.id || message.viewed_at) return;
+    const { data: signed, error: signError } = await supabase.storage
+      .from("chat-images")
+      .createSignedUrl(message.image_url, 90);
+    if (signError || !signed?.signedUrl) {
+      toast.error("Não foi possível abrir esta fotografia.");
+      return;
+    }
+    const { error } = await supabase.rpc("open_view_once_message", { p_message_id: message.id });
+    if (error) {
+      toast.error(error.message || "Esta fotografia já foi aberta.");
+      setMessages((current) => current.map((item) => item.id === message.id ? { ...item, viewed_at: item.viewed_at || new Date().toISOString() } : item));
+      return;
+    }
+    setMessages((current) => current.map((item) => item.id === message.id ? { ...item, viewed_at: new Date().toISOString(), viewed_by: user.id } : item));
+    setLightbox(signed.signedUrl);
+    setLightboxMessage(message);
   }
   function notifyMessage(messageId: string, preview: string) {
     void fetch("/api/notifications/message", {
@@ -477,7 +489,7 @@ export default function Chat() {
             </>
           )}
         </header>
-        <section className="no-scrollbar flex-1 overflow-y-auto px-3 py-4">
+        <section className="chat-canvas no-scrollbar flex-1 overflow-y-auto px-3 py-4">
           {loading ? (
             <div className="grid h-full place-items-center">
               <LoaderCircle className="animate-spin text-[var(--brand)]" />
@@ -549,20 +561,18 @@ export default function Chat() {
                             )}
                           </div>
                         )}
-                        {m.message_type === "image" && m.signed_image_url && (
+                        {m.message_type === "image" && m.image_url && (
                           <div className="relative">
                             {m.view_once ? (
                               <button
-                                onClick={() => {
-                                  setLightbox(m.signed_image_url!);
-                                  setLightboxMessage(m);
-                                }}
-                                className="mb-2.5 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-[var(--brand)] to-[var(--brand-2)] py-4 text-white shadow-sm press"
+                                onClick={() => void openViewOnce(m)}
+                                disabled={m.sender_id === user?.id || !!m.viewed_at}
+                                className="mb-2.5 flex w-full items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/12 px-4 py-4 text-inherit shadow-sm press disabled:cursor-default disabled:opacity-60"
                               >
                                 <Camera size={20} />
-                                <span className="font-medium">Ver foto</span>
+                                <span className="font-medium">{m.sender_id === user?.id ? "Foto de visualização única enviada" : m.viewed_at ? "Fotografia já aberta" : "Abrir uma vez"}</span>
                               </button>
-                            ) : (
+                            ) : m.signed_image_url ? (
                               <button
                                 onClick={() => setLightbox(m.signed_image_url!)}
                                 className="mb-2.5 block overflow-hidden rounded-2xl shadow-sm"
@@ -574,7 +584,7 @@ export default function Chat() {
                                   loading="lazy"
                                 />
                               </button>
-                            )}
+                            ) : null}
                           </div>
                         )}
                         {m.message_type === "voice" && m.signed_voice_url && (
@@ -705,7 +715,7 @@ export default function Chat() {
             </button>
           </div>
         )}
-        <footer className="safe-bottom flex items-end gap-2 border-t hairline bg-[var(--surface)] px-3 pt-3">
+        <footer className="safe-bottom glass flex items-end gap-2 border-t hairline px-3 pt-3">
           <ImagePicker onSend={sendImage} onLocation={() => setShowLocationPicker(true)} />
           <div className="flex min-h-11 flex-1 items-end rounded-[24px] bg-[var(--surface-2)] px-4 shadow-inner">
             <textarea
@@ -760,18 +770,7 @@ export default function Chat() {
               />
             </div>
             <div className="absolute bottom-[max(24px,env(safe-area-inset-bottom))] left-1/2 -translate-x-1/2 flex gap-4 z-10">
-              {lightboxMessage?.view_once && (
-                <button
-                  onClick={() => {
-                    setReply(lightboxMessage);
-                    setLightbox(null);
-                    setLightboxMessage(null);
-                  }}
-                  className="grid size-12 place-items-center rounded-full bg-white/20 backdrop-blur-md text-white press hover:bg-white/30 transition-colors"
-                >
-                  <Camera size={22} />
-                </button>
-              )}
+              {lightboxMessage?.view_once && <span className="rounded-full bg-black/45 px-4 py-2 text-xs font-semibold text-white backdrop-blur-md">Não poderás abrir novamente</span>}
               {!lightboxMessage?.view_once && (
                 <a
                   href={lightbox}

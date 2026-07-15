@@ -5,7 +5,7 @@ import { MapPin, X, LoaderCircle, RefreshCw } from "lucide-react";
 type SharedLocation = { lat: number; lng: number; address?: string; accuracy?: number };
 
 interface LocationPickerProps {
-  onSend: (location: SharedLocation) => void;
+  onSend: (location: SharedLocation) => Promise<void> | void;
   onClose: () => void;
 }
 
@@ -13,6 +13,19 @@ export function LocationPicker({ onSend, onClose }: LocationPickerProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [location, setLocation] = useState<SharedLocation | null>(null);
+  const [sending, setSending] = useState(false);
+
+  async function shareLocation() {
+    if (!location || sending) return;
+    setSending(true);
+    try {
+      await onSend(location);
+    } catch {
+      // The parent shows the detailed database/storage error and keeps this sheet open.
+    } finally {
+      setSending(false);
+    }
+  }
 
   const getCurrentLocation = () => {
     setLoading(true);
@@ -138,11 +151,11 @@ export function LocationPicker({ onSend, onClose }: LocationPickerProps) {
 
         <div className="flex gap-3">
           <button
-            onClick={() => location && onSend(location)}
-            disabled={!location}
+            onClick={() => void shareLocation()}
+            disabled={!location || sending}
             className="flex-1 rounded-xl bg-[var(--brand)] py-3 font-semibold text-white press disabled:opacity-50"
           >
-            Partilhar
+            {sending ? <LoaderCircle size={18} className="mx-auto animate-spin" /> : "Partilhar"}
           </button>
           <button
             onClick={onClose}

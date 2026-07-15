@@ -144,7 +144,7 @@ export default function Conversas() {
               <Link
                 key={c.conversation_id}
                 href={`/conversa/${c.conversation_id}`}
-                className="press flex items-center gap-3 rounded-3xl p-3 hover:bg-[var(--surface)]"
+                className="press flex items-center gap-3 rounded-[22px] border border-transparent bg-[var(--surface)] p-3 shadow-[0_5px_18px_rgba(32,34,65,.04)] hover:border-[var(--line)]"
               >
                 <Avatar
                   src={c.avatar_url}
